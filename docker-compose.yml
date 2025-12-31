@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  bot:
+    container_name: taxibot
+    build: .
+    restart: always
+    env_file:
+      - .env
+    # If using local MongoDB container, uncomment below and update MONGO_URI in .env to mongodb://mongo:27017/taxibot
+    # depends_on:
+    #   - mongo
+
+  # mongo:
+  #   image: mongo:latest
+  #   container_name: taxibot_mongo
+  #   restart: always
+  #   volumes:
+  #     - mongo_data:/data/db
+
+# volumes:
+#   mongo_data:

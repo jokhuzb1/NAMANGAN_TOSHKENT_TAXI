@@ -1,0 +1,17 @@
+# Dependencies
+node_modules
+package-lock.json
+
+# Environmental Variables
+.env
+
+# System
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log
+*.log
+
+# Docker
+.dockerignore
