@@ -25,6 +25,28 @@ bot.use(async (ctx, next) => {
     await next();
 });
 
+// Rate Limiter (Anti-Spam)
+const { limit } = require("@grammyjs/ratelimiter");
+bot.use(limit({
+    timeFrame: 2000, // 2 seconds
+    limit: 1, // Allow 1 request per 2 seconds (Strict? Maybe 2 requests?) 
+    // Button spamming: usually 1 click is processed, subseqent are ignored. 
+    // Let's set limit: 2 to allow fast double tap but block machine gun.
+    limit: 3,
+    onLimitExceeded: async (ctx) => {
+        try {
+            if (ctx.callbackQuery) {
+                await ctx.answerCallbackQuery({ text: "⚠️ Iltimos, sekinroq boshing!", show_alert: true });
+            } else {
+                // For messages, we might not want to reply every time to avoid flooding
+                // Just ignore or log
+                console.log(`[SPAM] User ${ctx.from.id} is spamming.`);
+            }
+        } catch (e) { } // Ignore errors if user blocked etc
+    },
+    keyGenerator: (ctx) => ctx.from?.id,
+}));
+
 // Middleware
 bot.use(session({ initial: () => ({}) }));
 bot.use(conversations());
