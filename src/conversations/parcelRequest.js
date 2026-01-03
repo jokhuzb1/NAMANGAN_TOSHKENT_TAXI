@@ -10,11 +10,11 @@ async function parcelRequestConversation(conversation, ctx) {
     while (step <= 6) {
         // Common Handler for Cancel
         const handleCommonActions = async (text) => {
-            if (text === "❌ Bekor qilish") {
-                await ctx.reply("❌ Pochta yuborish bekor qilindi.", { reply_markup: keyboardsUtils.passengerMenu });
+            if (text === "❌ Бекор қилиш") {
+                await ctx.reply("❌ Почта юбориш бекор қилинди.", { reply_markup: keyboardsUtils.passengerMenu });
                 return "CANCEL";
             }
-            if (text === "⬅️ Orqaga") {
+            if (text === "⬅️ Орқага") {
                 return "BACK";
             }
             return null;
@@ -22,18 +22,18 @@ async function parcelRequestConversation(conversation, ctx) {
 
         // Step 1: Route
         if (step === 1) {
-            await ctx.reply("📦 Pochta yuborish uchun yo'nalishni tanlang:", { reply_markup: keyboardsUtils.routeSelectionReply });
+            await ctx.reply("📦 Почта юбориш учун йўналишни танланг:", { reply_markup: keyboardsUtils.routeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
             const action = await handleCommonActions(text);
             if (action === "CANCEL") return;
 
-            if (text.includes("Tashkent ➡️ Namangan")) {
+            if (text.includes("Тошкент ➡️ Наманган")) {
                 state.from = "Tashkent";
                 state.to = "Namangan";
                 state.routeData = "route_tash_nam";
-            } else if (text.includes("Namangan ➡️ Tashkent")) {
+            } else if (text.includes("Наманган ➡️ Тошкент")) {
                 state.from = "Namangan";
                 state.to = "Tashkent";
                 state.routeData = "route_nam_tash";
@@ -44,7 +44,7 @@ async function parcelRequestConversation(conversation, ctx) {
         }
         // Step 2: Time
         else if (step === 2) {
-            await ctx.reply("⏰ Qachon yuborasiz?", { reply_markup: keyboardsUtils.parcelTimeSelectionReply });
+            await ctx.reply("⏰ Қачон юборасиз?", { reply_markup: keyboardsUtils.parcelTimeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
@@ -58,7 +58,7 @@ async function parcelRequestConversation(conversation, ctx) {
         }
         // Step 3: Package Type
         else if (step === 3) {
-            await ctx.reply("📦 Nima yubormoqchisiz?", { reply_markup: keyboardsUtils.packageTypeSelectionReply });
+            await ctx.reply("📦 Нима юбормоқчисиз?", { reply_markup: keyboardsUtils.packageTypeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
@@ -66,23 +66,24 @@ async function parcelRequestConversation(conversation, ctx) {
             if (action === "CANCEL") return;
             if (action === "BACK") { step = 2; continue; }
 
-            state.packageTypeRaw = text;
-            state.packageType = text.replace(/[\u{1F600}-\u{1F6FF}|[\u{2600}-\u{26FF}]/gu, "").trim();
+            state.packageTypeRaw = text; // Save original
 
-            if (text.includes("Dokument")) state.packageType = "Dokument";
-            else if (text.includes("Korobka")) state.packageType = "Korobka";
-            else if (text.includes("Yuk")) state.packageType = "Yuk";
-            else state.packageType = "Boshqa";
+            // Clean up emojis using simple check
+            let cleanText = text;
+            if (text.includes("Документ")) state.packageType = "Документ";
+            else if (text.includes("Коробка")) state.packageType = "Коробка";
+            else if (text.includes("Юк")) state.packageType = "Юк";
+            else state.packageType = "Бошқа";
 
             step = 4;
         }
         // Step 4: Location Details (Text or Voice)
         else if (step === 4) {
             const kb = new Keyboard()
-                .text("⬅️ Orqaga").text("❌ Bekor qilish")
+                .text("⬅️ Орқага").text("❌ Бекор қилиш")
                 .resized();
 
-            await ctx.reply(`🚩 <b>Pochta haqida qo'shimcha ma'lumot:</b>\n\nMasalan: <i>"Qayerdan olib ketish va kimga berish, yuk og'irligi..."</i>\n\nYozishingiz yoki <b>Ovozli xabar</b> yuborishingiz mumkin.`, {
+            await ctx.reply(`🚩 <b>Почта ҳақида қўшимча маълумот:</b>\n\nМасалан: <i>"Қаердан олиб кетиш ва кимга бериш, юк оғирлиги..."</i>\n\nЁзишингиз ёки <b>Овозли хабар</b> юборишингиз мумкин.`, {
                 parse_mode: "HTML",
                 reply_markup: kb
             });
@@ -100,18 +101,18 @@ async function parcelRequestConversation(conversation, ctx) {
                 step = 5;
 
             } else if (response.message.voice) {
-                state.district = "🔊 Ovozli xabar";
+                state.district = "🔊 Овозли хабар";
                 state.voiceId = response.message.voice.file_id;
                 step = 5;
             }
         }
-        // Step 5: Image Upload (Optional or Required? Prompt says "Pochtani topshirishdan oldin rasmga olib botga yuklash (bu xavfsizlik va ishonch uchun juda muhim)". Lets make it optional but recommended)
+        // Step 5: Image Upload
         else if (step === 5) {
             const kb = new Keyboard()
-                .text("➡️ O'tkazib yuborish").text("⬅️ Orqaga").text("❌ Bekor qilish")
+                .text("➡️ Ўтказиб юбориш").text("⬅️ Орқага").text("❌ Бекор қилиш")
                 .resized();
 
-            await ctx.reply(`📸 <b>Pochta rasmini yuklang</b> (Ixtiyoriy)\n\nBu haydovchiga yukni tushunishga va ishonchni oshirishga yordam beradi.`, {
+            await ctx.reply(`📸 <b>Почта расмини юкланг</b> (Ихтиёрий)\n\nБу ҳайдовчига юкни тушунишга ва ишончни оширишга ёрдам беради.`, {
                 parse_mode: "HTML",
                 reply_markup: kb
             });
@@ -129,11 +130,11 @@ async function parcelRequestConversation(conversation, ctx) {
                 if (action === "CANCEL") return;
                 if (action === "BACK") { step = 4; continue; }
 
-                if (text === "➡️ O'tkazib yuborish") {
+                if (text.includes("Ўтказиб юбориш")) {
                     state.parcelImage = null;
                     step = 6;
                 } else {
-                    await ctx.reply("Iltimos, rasm yuklang yoki 'O'tkazib yuborish'ni bosing.");
+                    await ctx.reply("Илтимос, расм юкланг ёки 'Ўтказиб юбориш'ни босинг.");
                 }
             }
         }
@@ -141,17 +142,17 @@ async function parcelRequestConversation(conversation, ctx) {
         else if (step === 6) {
             let details = state.district;
             if (state.voiceId) details += " (🔊)";
-            if (state.parcelImage) details += " (📸 Rasm bor)";
+            if (state.parcelImage) details += " (📸 Расм бор)";
 
             const summary = `
-📦 <b>Pochta Ma'lumotlari:</b>
+📦 <b>Почта Маълумотлари:</b>
 
-📍 Yo'nalish: ${state.from} ➡️ ${state.to}
-⏰ Vaqt: ${state.readableTime}
-📦 Tur: ${state.packageType}
-🚩 Tafsilotlar: ${details}
+📍 Йўналиш: ${state.from} ➡️ ${state.to}
+⏰ Вақт: ${state.readableTime}
+📦 Тур: ${state.packageType}
+🚩 Тафсилотлар: ${details}
 `;
-            await ctx.reply(summary + "\n\n" + "Tasdiqlaysizmi?", { parse_mode: "HTML", reply_markup: keyboardsUtils.confirmRideReply });
+            await ctx.reply(summary + "\n\n" + "Тасдиқлайсизми?", { parse_mode: "HTML", reply_markup: keyboardsUtils.confirmRideReply });
 
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
@@ -160,7 +161,7 @@ async function parcelRequestConversation(conversation, ctx) {
             if (action === "CANCEL") return;
             if (action === "BACK") { step = 5; continue; }
 
-            if (text === "✅ Tasdiqlash") {
+            if (text === "✅ Тасдиқлаш") {
                 break;
             }
         }
@@ -185,7 +186,7 @@ async function parcelRequestConversation(conversation, ctx) {
         savedRequest = await request.save();
     });
 
-    await ctx.reply(`✅ Pochta so'rovi qabul qilindi! ID: ${savedRequest._id}\n\nHaydovchilarga yuborildi. Takliflarni kuting...`, { reply_markup: keyboardsUtils.passengerMenu });
+    await ctx.reply(`✅ Почта сўрови қабул қилинди!\n\nҲайдовчиларга юборилди. Таклифларни кутинг...`, { reply_markup: keyboardsUtils.passengerMenu });
 
     // Broadcast to drivers
     await conversation.external(async () => {

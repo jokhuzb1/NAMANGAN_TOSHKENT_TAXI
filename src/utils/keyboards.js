@@ -3,36 +3,36 @@ const { Keyboard, InlineKeyboard } = require("grammy");
 // --- Reply Keyboards (Persistent Menus) ---
 
 const roleSelection = new Keyboard()
-    .text("🚖 Haydovchi").text("🧍 Yo'lovchi")
+    .text("🚖 Ҳайдовчи").text("🧍 Йўловчи")
     .resized();
 
 const passengerMenu = new Keyboard()
-    .text("🚕 Taksi buyurtma qilish")
+    .text("🚕 Такси буюртма қилиш")
     .row()
-    .text("🚖 Mening Buyurtmam")
+    .text("🚖 Менинг Буюртмам")
     .row()
-    .text("📦 Pochta yuborish")
+    .text("📦 Почта юбориш")
     .row()
-    .text("👀 Bo'sh haydovchilar")
-    .text("⚙️ Sozlamalar")
+    .text("👀 Бўш ҳайдовчилар")
+    .text("⚙️ Созламалар")
     .resized();
 
 const driverMenu = new Keyboard()
-    .text("🟢 Ishdaman").text("🔴 Dam olyapman")
+    .text("🟢 Ишдаман").text("🔴 Дам оляпман")
     .row()
-    .text("📡 OCHIQ BUYURTMALAR")
+    .text("📡 ОЧИҚ БУЮРТМАЛАР")
     .row()
-    .text("⚙️ Sozlamalar")
+    .text("⚙️ Созламалар")
     .resized();
 
 const requestContact = new Keyboard()
-    .requestContact("📞 Telefon raqamni yuborish")
+    .requestContact("📞 Телефон рақамни юбориш")
     .row()
-    .text("❌ Bekor qilish")
+    .text("❌ Бекор қилиш")
     .resized();
 
 const cancelKeyboard = new Keyboard()
-    .text("❌ Bekor qilish")
+    .text("❌ Бекор қилиш")
     .resized();
 
 // --- Inline Keyboards (Action Interactions) ---
@@ -102,38 +102,54 @@ const confirmRide = new InlineKeyboard()
 
 // Driver: Bid on Request
 const driverBid = (requestId) => new InlineKeyboard()
-    .text("🙋‍♂️ Taklif berish", `bid_${requestId}`);
+    .text("🙋‍♂️ Таклиф бериш", `bid_${requestId}`);
+
+// Driver: Take Admin Request (Direct Contact)
+const adminOrderTake = (requestId) => new InlineKeyboard()
+    .text("📞 Raqamni olish (5 ta qoldi)", `take_admin_${requestId}`);
+
 
 // Passenger: Accept/Decline Offer
-const offerAction = (offerIndex, driverId) => {
+const offerAction = (requestId, offerId, driverId) => {
     const kb = new InlineKeyboard();
     if (driverId) {
-        kb.text("📷 Mashina Rasmi", `view_car_offer_${driverId}`).row();
+        kb.text("📷 Машина расми", `view_car_offer_${driverId}`).row();
     }
-    kb.text("✅ Qabul qilish", `accept_${offerIndex}`).text("❌ Rad etish", `decline_${offerIndex}`);
+    // Using Offer ID ensures we pick the right one even if array order changes
+    // Including Request ID ensures we pick the right Request!
+    kb.text("✅ Қабул қилиш", `accept_${requestId}_${offerId}`).text("❌ Рад этиш", `decline_${requestId}_${offerId}`);
     return kb;
 }
 
 // Contact Actions (After Match)
 // Edit Request Options
 const editRequestMenu = (requestId) => new InlineKeyboard()
-    .text("⏰ Vaqtni o'zgartirish", `edit_req_menu_time_${requestId}`).row()
-    .text("📍 Yo'nalishni o'zgartirish", `edit_req_menu_route_${requestId}`).row()
-    .text("💺 Joylar sonini o'zgartirish", `edit_req_menu_seats_${requestId}`).row()
-    .text("🔙 Orqaga", `back_to_req_${requestId}`);
+    .text("⏰ Вақтни ўзгартириш", `edit_req_menu_time_${requestId}`).row()
+    .text("📍 Йўналишни ўзгартириш", `edit_req_menu_route_${requestId}`).row()
+    .text("💺 Жойлар сонини ўзгартириш", `edit_req_menu_seats_${requestId}`).row()
+    .text("🔙 Орқага", `back_to_req_${requestId}`);
+
+// Helper function to format phone number with +
+const formatPhone = (phone) => {
+    if (!phone) return null;
+    const cleaned = phone.toString().replace(/[^\d]/g, '');
+    return cleaned.startsWith('998') ? '+' + cleaned : (cleaned.length > 0 ? '+' + cleaned : null);
+};
 
 const contactActions = (user) => {
     const kb = new InlineKeyboard();
+
+    // Telegram link - prefer username, fallback to user ID link
     if (user.username) {
-        kb.url("💬 Telegram yozish", `https://t.me/${user.username}`);
-    } else {
-        kb.url("💬 Telegram profil", `tg://user?id=${user.telegramId}`);
+        kb.url("💬 Телеграм ёзиш", `https://t.me/${user.username}`);
+    } else if (user.telegramId) {
+        // tg://user?id= works for users who have enabled "Allow others to find me"
+        kb.url("💬 Телеграм профил", `tg://user?id=${user.telegramId}`);
     }
 
-    // Add Call Button
-    if (user.phone) {
-        kb.text("📞 Bog'lanish", `show_contact_${user._id}`);
-    }
+    // Phone call button - detailed in text, so we don't need a button that causes errors
+    // Telegram does not support 'tel:' scheme in inline buttons.
+    // The phone number is already displayed in the message text which is clickable.
 
     return kb;
 };
@@ -142,55 +158,56 @@ const contactActions = (user) => {
 // --- Reply Keyboards for Conversations ---
 
 const routeSelectionReply = new Keyboard()
-    .text("Tashkent ➡️ Namangan").row()
-    .text("Namangan ➡️ Tashkent").row()
-    .text("❌ Bekor qilish")
+    .text("Тошкент ➡️ Наманган").row()
+    .text("Наманган ➡️ Тошкент").row()
+    .text("❌ Бекор қилиш")
     .resized();
 
 const timeSelectionReply = new Keyboard()
-    .text("🚀 Tayyor yo'lovchi").row()
-    .text("☀️ Bugun").text("🌙 Ertaga").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("🚀 Ҳозир").row()
+    .text("☀️ Бугун").text("🌙 Эртага").row()
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const parcelTimeSelectionReply = new Keyboard()
-    .text("🚀 Tayyor pochta/yuk").row()
-    .text("☀️ Bugun").text("🌙 Ertaga").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("📦 Тайёр почта/юк").row()
+    .text("☀️ Бугун").text("🌙 Эртага").row()
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const seatSelectionReply = new Keyboard()
     .text("1").text("2").text("3").text("4").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const seatTypeSelectionReply = new Keyboard()
-    .text("Old o'rindiq").text("Orqa o'rindiq").row()
-    .text("Farqi yo'q").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("Олд ўриндиқ").text("Орқа ўриндиқ").row()
+    .text("Фарқи йўқ").row()
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const packageTypeSelectionReply = new Keyboard()
-    .text("📄 Dokument").text("📦 Korobka").row()
-    .text("🎒 Yuk").text("❓ Boshqa").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("📄 Документ").text("📦 Коробка").row()
+    .text("🎒 Юк").text("❓ Бошқа").row()
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const confirmRideReply = new Keyboard()
-    .text("✅ Tasdiqlash").row()
-    .text("⬅️ Orqaga").text("❌ Bekor qilish")
+    .text("✅ Тасдиқлаш").row()
+    .text("⬅️ Орқага").text("❌ Бекор қилиш")
     .resized();
 
 const priceSuggestionTaxi = new Keyboard()
     .text("100 000").text("125 000").text("150 000").row()
-    .text("200 000").text("✏️ Boshqa narx").row()
-    .text("❌ Bekor qilish")
+    .text("200 000").text("✏️ Бошқа нарх").row()
+    .text("❌ Бекор қилиш")
+    // Values are numbers, so they stay same. Text "Boshqa narx" -> "Бошқа нарх"
     .resized();
 
 const priceSuggestionParcel = new Keyboard()
     .text("20 000").text("40 000").text("60 000").row()
-    .text("80 000").text("100 000").text("✏️ Boshqa narx").row()
-    .text("❌ Bekor qilish")
+    .text("80 000").text("100 000").text("✏️ Бошқа нарх").row()
+    .text("❌ Бекор қилиш")
     .resized();
 
 
@@ -207,8 +224,10 @@ module.exports = {
     seatTypeSelection,
     confirmRide,
     driverBid,
+    adminOrderTake,
     offerAction,
     contactActions,
+    formatPhone,
     carNameMap,
     carFilter,
     editRequestMenu,

@@ -1,26 +1,26 @@
 const { InlineKeyboard } = require('grammy');
 const RideRequest = require('../models/RideRequest');
 const User = require('../models/User');
-const { t } = require('../utils/i18n_fixed');
+const { t } = require('../utils/i18n_fixed'); // Actually we can just hardcode if we are forcing Cyrillic
 
 // Temporary conversation to handle Quick Request creation
 async function quickRequestConversation(conversation, ctx) {
     // 1. Get Info from Session
     const quickInfo = ctx.session.quickOffer;
     if (!quickInfo || !quickInfo.driverId) {
-        await ctx.reply('Xatolik: Ma\'lumotlar yo\'qolgan.');
+        await ctx.reply("⚠️ Хатолик: Маълумотлар йўқолган.");
         return;
     }
 
     const { driverId, from, to } = quickInfo;
 
     // 2. Ask Time (Skip Route Selection as it is inferred)
-    await ctx.reply(`📍 <b>${from} ➡️ ${to}</b>\n\n⏰ Ketish vaqtini tanlang:`, {
+    await ctx.reply(`📍 <b>${from} ➡️ ${to}</b>\n\n⏰ Кетиш вақтини танланг:`, {
         parse_mode: 'HTML',
         reply_markup: new InlineKeyboard()
-            .text(t('time_now', 'uz_cyrillic'), 'time_now').row()
-            .text(t('time_today', 'uz_cyrillic'), 'time_today').row()
-            .text(t('time_tomorrow', 'uz_cyrillic'), 'time_tomorrow')
+            .text("🚀 Ҳозир", 'time_now').row()
+            .text("📅 Бугун", 'time_today').row()
+            .text("📆 Эртага", 'time_tomorrow')
     });
 
     const timeCtx = await conversation.waitFor('callback_query:data');
@@ -28,11 +28,11 @@ async function quickRequestConversation(conversation, ctx) {
     await timeCtx.answerCallbackQuery();
 
     const timeMap = {
-        'time_now': 'Hozir (Tezkor)',
-        'time_today': 'Bugun',
-        'time_tomorrow': 'Ertaga'
+        'time_now': '🚀 Ҳозир',
+        'time_today': '📅 Бугун',
+        'time_tomorrow': '📆 Эртага'
     };
-    const time = timeMap[timeData] || 'Hozir';
+    const time = timeMap[timeData] || '🚀 Ҳозир';
 
     // 3. Create Request
     const request = await conversation.external(async () => {
@@ -55,19 +55,19 @@ async function quickRequestConversation(conversation, ctx) {
     if (driver && passenger) {
         try {
             // Send Offer to Driver
-            const offerMsg = `⚡️ <b>SIZGA MAXSUS TAKLIF TUSHDI!</b>\n\n👤 Yo'lovchi: ${passenger.name}\n📍 Yo'nalish: ${from} ➡️ ${to}\n⏰ Vaqt: ${time}\n💺 Joy: 1 kishi (Taxminiy)\n\n<i>Ushbu yo'lovchi sizni to'g'ridan-to'g'ri tanladi!</i>`;
+            const offerMsg = `⚡️ <b>СИЗГА МАХСУС ТАКЛИФ ТУШДИ!</b>\n\n👤 Йўловчи: ${passenger.name}\n📍 Йўналиш: ${from} ➡️ ${to}\n⏰ Вақт: ${time}\n💺 Жой: 1 киши (Тахминий)\n\n<i>Ушбу йўловчи сизни тўғридан-тўғри танлади!</i>`;
 
             await conversation.external(async () => {
                 await ctx.api.sendMessage(driver.telegramId, offerMsg, {
                     parse_mode: 'HTML',
-                    reply_markup: new InlineKeyboard().text('🙋‍♂️ Taklif berish', `bid_${request._id}`)
+                    reply_markup: new InlineKeyboard().text('🙋‍♂️ Таклиф бериш', `bid_${request._id}`)
                 });
             });
 
-            await timeCtx.reply('✅ <b>Taklif yuborildi!</b>\nHaydovchi javobini kuting. \n\nBuyurtmangiz yaratildi.', { parse_mode: 'HTML' });
+            await timeCtx.reply('✅ <b>Таклиф юборилди!</b>\nҲайдовчи жавобини кутинг.\n\nБуюртмангиз яратилди.', { parse_mode: 'HTML' });
         } catch (e) {
             console.error("Failed to notify driver:", e);
-            await timeCtx.reply('⚠️ Haydovchiga xabar yuborishda xatolik bo\'ldi.');
+            await timeCtx.reply('⚠️ Ҳайдовчига хабар юборишда хатолик бўлди.');
         }
     }
 }

@@ -8,8 +8,8 @@ async function driverSettings(conversation, ctx) {
     // Helper to show main menu
     // Helper to show main menu
     const showMainMenu = async (ctx) => {
-        const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }));
-        const lang = user.language || 'uz_cyrillic';
+        const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }).lean());
+        const lang = user?.language || 'uz_cyrillic';
 
         await ctx.reply("⚙️ <b>" + t('settings', lang) + "</b>", {
             reply_markup: new InlineKeyboard()
@@ -58,8 +58,8 @@ const { driverRegister } = require("./registration");
 
 async function passengerSettings(conversation, ctx) {
     // Passenger Settings
-    const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }));
-    const lang = user.language || 'uz_cyrillic';
+    const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }).lean());
+    const lang = user?.language || 'uz_cyrillic';
 
     await ctx.reply("⚙️ <b>" + t('settings', lang) + "</b>", {
         reply_markup: new InlineKeyboard()
@@ -141,27 +141,28 @@ async function manageProfile(conversation, ctx) {
         // Fetch current info
         const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }).lean());
         const details = user.carDetails || {};
+        const formattedPhone = user.phone ? (user.phone.startsWith('+') ? user.phone : '+' + user.phone) : '-';
 
         const infoMsg = `
-<b>📝 Profilni Tahrirlash</b>
+<b>📝 Профилни Таҳрирлаш</b>
 
-👤 <b>Ism:</b> ${user.name || '-'}
-🔢 <b>Mashina Raqami:</b> ${user.carNumber || '-'}
-📞 <b>Telefon:</b> ${user.phone || '-'}
-🚗 <b>Model:</b> ${details.model || user.carModel || '-'}
-🎨 <b>Rang:</b> ${details.color || '-'}
-📅 <b>Yil:</b> ${details.year || '-'}
+👤 <b>Исм:</b> ${user.name || '-'}
+🔢 <b>Машина Рақами:</b> ${user.carNumber || '-'}
+📞 <b>Телефон:</b> ${formattedPhone}
+🚗 <b>Модел:</b> ${details.model || user.carModel || '-'}
+🎨 <b>Ранг:</b> ${details.color || '-'}
+📅 <b>Йил:</b> ${details.year || '-'}
 `;
         await ctx.reply(infoMsg, {
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard()
-                .text("👤 Ism", "edit_profile_name")
-                .text("📞 Telefon", "edit_profile_phone").row()
-                .text("🚗 Model", "edit_profile_model")
-                .text("🎨 Rang", "edit_profile_color")
-                .text("📅 Yil", "edit_profile_year").row()
-                .text("🔢 Mashina Raqami", "edit_profile_carnumber").row()
-                .text("🔙 Orqaga", "back_to_settings_main")
+                .text("👤 Исм", "edit_profile_name")
+                .text("📞 Телефон", "edit_profile_phone").row()
+                .text("🚗 Модел", "edit_profile_model")
+                .text("🎨 Ранг", "edit_profile_color")
+                .text("📅 Йил", "edit_profile_year").row()
+                .text("🔢 Машина Рақами", "edit_profile_carnumber").row()
+                .text("🔙 Орқага", "back_to_settings_main")
         });
 
         const actionCtx = await conversation.waitFor("callback_query:data");
@@ -173,52 +174,52 @@ async function manageProfile(conversation, ctx) {
         }
 
         if (action === "edit_profile_name") {
-            await ctx.reply("✏️ Yangi ismingizni yozing:");
+            await ctx.reply("✏️ Янги исмингизни ёзинг:");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { name: message.text });
             });
-            await ctx.reply("✅ Ism yangilandi!");
+            await ctx.reply("✅ Исм янгиланди!");
 
         } else if (action === "edit_profile_carnumber") {
-            await ctx.reply("✏️ Yangi mashina raqamini yozing (masalan: 01 A 000 AA):");
+            await ctx.reply("✏️ Янги машина рақамини ёзинг (масалан: 01 A 000 AA):");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { carNumber: message.text });
             });
-            await ctx.reply("✅ Mashina raqami yangilandi!");
+            await ctx.reply("✅ Машина рақами янгиланди!");
 
         } else if (action === "edit_profile_phone") {
-            await ctx.reply("📞 Yangi telefon raqamini yozing:");
+            await ctx.reply("📞 Янги телефон рақамини ёзинг:");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { phone: message.text });
             });
-            await ctx.reply("✅ Telefon raqami yangilandi!");
+            await ctx.reply("✅ Телефон рақами янгиланди!");
 
         } else if (action === "edit_profile_model") {
-            await ctx.reply("🚗 Yangi mashina modelini yozing (masalan: Gentra):");
+            await ctx.reply("🚗 Янги машина моделини ёзинг (масалан: Gentra):");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.model": message.text, "carModel": message.text });
             });
-            await ctx.reply("✅ Mashina modeli yangilandi!");
+            await ctx.reply("✅ Машина модели янгиланди!");
 
         } else if (action === "edit_profile_color") {
-            await ctx.reply("🎨 Yangi mashina rangini yozing (masalan: Oq):");
+            await ctx.reply("🎨 Янги машина рангини ёзинг (масалан: Оқ):");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.color": message.text });
             });
-            await ctx.reply("✅ Mashina rangi yangilandi!");
+            await ctx.reply("✅ Машина ранги янгиланди!");
 
         } else if (action === "edit_profile_year") {
-            await ctx.reply("📅 Mashina yilini yozing (masalan: 2023):");
+            await ctx.reply("📅 Машина йилини ёзинг (масалан: 2023):");
             const { message } = await conversation.waitFor("message:text");
             await conversation.external(async () => {
                 await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.year": message.text });
             });
-            await ctx.reply("✅ Mashina yili yangilandi!");
+            await ctx.reply("✅ Машина йили янгиланди!");
         }
     }
 }
@@ -237,16 +238,16 @@ async function manageCarPhotos(conversation, ctx) {
 
         // 1. List Photos one by one
         if (carImages.length === 0) {
-            await ctx.reply("📂 Sizda hozircha mashina rasmlari yo'q.");
+            await ctx.reply("📂 Сизда ҳозирча машина расмлари йўқ.");
         } else {
-            await ctx.reply(`📂 <b>Sizning rasmlaringiz (${carImages.length}/3):</b>`, { parse_mode: "HTML" });
+            await ctx.reply(`📂 <b>Сизнинг расмларингиз (${carImages.length}/3):</b>`, { parse_mode: "HTML" });
 
             // Loop and send
             for (let i = 0; i < carImages.length; i++) {
                 const img = carImages[i];
                 await ctx.replyWithPhoto(img.telegramFileId, {
-                    caption: `Rasm #${i + 1}`,
-                    reply_markup: new InlineKeyboard().text("🗑 O'chirish", `delete_photo_${i}`)
+                    caption: `Расм #${i + 1}`,
+                    reply_markup: new InlineKeyboard().text("🗑 Ўчириш", `delete_photo_${i}`)
                 });
             }
         }
@@ -254,11 +255,11 @@ async function manageCarPhotos(conversation, ctx) {
         // 2. Show Actions Menu (Add, Back)
         const menuKb = new InlineKeyboard();
         if (carImages.length < 3) {
-            menuKb.text("➕ Rasm qo'shish", "add_photo").row();
+            menuKb.text("➕ Расм қўшиш", "add_photo").row();
         }
-        menuKb.text("🔙 Orqaga", "back_to_settings");
+        menuKb.text("🔙 Орқага", "back_to_settings");
 
-        await ctx.reply("👇 Amalni tanlang:", { reply_markup: menuKb });
+        await ctx.reply("👇 Амални танланг:", { reply_markup: menuKb });
 
         // 3. Wait for Action
         const actionCtx = await conversation.waitFor(["callback_query:data", "message:photo"]);
@@ -274,7 +275,7 @@ async function manageCarPhotos(conversation, ctx) {
             }
 
             if (action === "add_photo") {
-                await ctx.reply("📸 Yangi rasmni yuboring (faqat rasm):");
+                await ctx.reply("📸 Янги расмни юборинг (фақат расм):");
                 const photoCtx = await conversation.waitFor("message:photo");
                 const newPhoto = photoCtx.message.photo[photoCtx.message.photo.length - 1];
 
@@ -295,7 +296,7 @@ async function manageCarPhotos(conversation, ctx) {
                     });
                     await u.save();
                 });
-                await ctx.reply("✅ Rasm saqlandi!");
+                await ctx.reply("✅ Расм сақланди!");
                 continue; // Loop refreshes list
             }
 
@@ -309,13 +310,13 @@ async function manageCarPhotos(conversation, ctx) {
                         await u.save();
                     }
                 });
-                await ctx.reply("🗑 Rasm o'chirildi.");
+                await ctx.reply("🗑 Расм ўчирилди.");
                 continue; // Loop refreshes list
             }
         } else {
             // If user sent a photo directly without clicking Add? 
             // We can ignore or handle. Let's ignore to prevent accidental uploads.
-            await ctx.reply("⚠️ Iltimos, tugmalardan foydalaning.");
+            await ctx.reply("⚠️ Илтимос, тугмалардан фойдаланинг.");
         }
     }
 }

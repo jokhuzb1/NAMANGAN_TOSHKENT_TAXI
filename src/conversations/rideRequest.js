@@ -1,7 +1,7 @@
 const RideRequest = require("../models/RideRequest");
 const User = require("../models/User");
 const keyboardsUtils = require("../utils/keyboards");
-const { Keyboard } = require("grammy"); // Import Keyboard here if needed locally
+const { Keyboard } = require("grammy");
 
 async function rideRequestConversation(conversation, ctx) {
     let step = 1;
@@ -10,11 +10,11 @@ async function rideRequestConversation(conversation, ctx) {
     while (step <= 6) {
         // Common Handler for Cancel
         const handleCommonActions = async (text) => {
-            if (text === "❌ Bekor qilish") {
-                await ctx.reply("❌ Buyurtma bekor qilindi.", { reply_markup: keyboardsUtils.passengerMenu });
+            if (text === "❌ Бекор қилиш") {
+                await ctx.reply("❌ Буюртма бекор қилинди.", { reply_markup: keyboardsUtils.passengerMenu });
                 return "CANCEL";
             }
-            if (text === "⬅️ Orqaga") {
+            if (text === "⬅️ Орқага") {
                 return "BACK";
             }
             return null;
@@ -22,18 +22,18 @@ async function rideRequestConversation(conversation, ctx) {
 
         // Step 1: Route
         if (step === 1) {
-            await ctx.reply("📍 Qaysi yo'nalishda ketmoqchisiz?", { reply_markup: keyboardsUtils.routeSelectionReply });
+            await ctx.reply("📍 Қайси йўналишда кетмоқчисиз?", { reply_markup: keyboardsUtils.routeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
             const action = await handleCommonActions(text);
             if (action === "CANCEL") return;
 
-            if (text.includes("Tashkent ➡️ Namangan")) {
+            if (text.includes("Тошкент ➡️ Наманган")) {
                 state.from = "Tashkent";
                 state.to = "Namangan";
                 state.routeData = "route_tash_nam";
-            } else if (text.includes("Namangan ➡️ Tashkent")) {
+            } else if (text.includes("Наманган ➡️ Тошкент")) {
                 state.from = "Namangan";
                 state.to = "Tashkent";
                 state.routeData = "route_nam_tash";
@@ -44,7 +44,7 @@ async function rideRequestConversation(conversation, ctx) {
         }
         // Step 2: Time
         else if (step === 2) {
-            await ctx.reply("⏰ Qachon yo'lga chiqasiz?", { reply_markup: keyboardsUtils.timeSelectionReply });
+            await ctx.reply("⏰ Қачон йўлга чиқасиз?", { reply_markup: keyboardsUtils.timeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
@@ -52,13 +52,13 @@ async function rideRequestConversation(conversation, ctx) {
             if (action === "CANCEL") return;
             if (action === "BACK") { step = 1; continue; }
 
-            state.readableTime = text;
-            state.timeData = text; // Usually we mapped keys, but for reply keyboard we get text.
+            state.readableTime = text; // Save Cyrillic text directly (e.g. "Ҳозир", "Бугун")
+            state.timeData = text;
             step = 3;
         }
         // Step 3: Seats
         else if (step === 3) {
-            await ctx.reply("💺 Nechta joy kerak?", { reply_markup: keyboardsUtils.seatSelectionReply });
+            await ctx.reply("💺 Нечта жой керак?", { reply_markup: keyboardsUtils.seatSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
@@ -74,7 +74,7 @@ async function rideRequestConversation(conversation, ctx) {
         }
         // Step 4: Seat Type
         else if (step === 4) {
-            await ctx.reply("💺 Qayerda o'tirmoqchisiz?", { reply_markup: keyboardsUtils.seatTypeSelectionReply });
+            await ctx.reply("💺 Қаерда ўтирмоқчисиз?", { reply_markup: keyboardsUtils.seatTypeSelectionReply });
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
 
@@ -82,11 +82,11 @@ async function rideRequestConversation(conversation, ctx) {
             if (action === "CANCEL") return;
             if (action === "BACK") { step = 3; continue; }
 
-            state.seatTypeRaw = text; // "Old o'rindiq", etc.
+            state.seatTypeRaw = text; // "Олд ўриндиқ", etc.
 
-            // Map to internal enum key if needed, or just store string
-            if (text.includes("Old")) state.seatTypeKey = "seat_front";
-            else if (text.includes("Orqa")) state.seatTypeKey = "seat_back";
+            // Map to internal enum key
+            if (text.includes("Олд")) state.seatTypeKey = "seat_front";
+            else if (text.includes("Орқа")) state.seatTypeKey = "seat_back";
             else state.seatTypeKey = "seat_any";
 
             step = 5;
@@ -94,10 +94,10 @@ async function rideRequestConversation(conversation, ctx) {
         // Step 5: Location Details (Text or Voice)
         else if (step === 5) {
             const kb = new Keyboard()
-                .text("⬅️ Orqaga").text("❌ Bekor qilish")
+                .text("⬅️ Орқага").text("❌ Бекор қилиш")
                 .resized();
 
-            await ctx.reply(`🚩 <b>Aniq manzilni kiriting:</b>\n\nMasalan: <i>"Yunusobod, Mega Planet oldi"</i> yoki <b>Ovozli xabar</b> yuboring.`, {
+            await ctx.reply(`🚩 <b>Аниқ манзилни киритинг:</b>\n\nМасалан: <i>"Юнусобод, Мега Планет олди"</i> ёки <b>Овозли хабар</b> юборинг.`, {
                 parse_mode: "HTML",
                 reply_markup: kb
             });
@@ -115,7 +115,7 @@ async function rideRequestConversation(conversation, ctx) {
                 step = 6;
 
             } else if (response.message.voice) {
-                state.district = "🔊 Ovozli xabar";
+                state.district = "🔊 Овозли хабар";
                 state.voiceId = response.message.voice.file_id;
                 step = 6;
             }
@@ -126,14 +126,14 @@ async function rideRequestConversation(conversation, ctx) {
             if (state.voiceId) details += " (🔊)";
 
             const summary = `
-📋 Buyurtma ma'lumotlari:
+📋 Буюртма маълумотлари:
 
-📍 Yo'nalish: ${state.from} ➡️ ${state.to}
-⏰ Vaqt: ${state.readableTime}
-💺 Joylar: ${state.seatCount} ta (${state.seatTypeRaw})
-🚩 Manzil: ${details}
+📍 Йўналиш: ${state.from} ➡️ ${state.to}
+⏰ Вақт: ${state.readableTime}
+💺 Жойлар: ${state.seatCount} та (${state.seatTypeRaw})
+🚩 Манзил: ${details}
 `;
-            await ctx.reply(summary + "\n\n" + "Tasdiqlaysizmi?", { reply_markup: keyboardsUtils.confirmRideReply });
+            await ctx.reply(summary + "\n\n" + "Тасдиқлайсизми?", { reply_markup: keyboardsUtils.confirmRideReply });
 
             const response = await conversation.waitFor("message:text");
             const text = response.message.text;
@@ -142,7 +142,7 @@ async function rideRequestConversation(conversation, ctx) {
             if (action === "CANCEL") return;
             if (action === "BACK") { step = 5; continue; }
 
-            if (text === "✅ Tasdiqlash") {
+            if (text === "✅ Тасдиқлаш") {
                 break;
             }
         }
@@ -165,7 +165,7 @@ async function rideRequestConversation(conversation, ctx) {
         savedRequest = await request.save();
     });
 
-    await ctx.reply(`✅ Buyurtmangiz qabul qilindi! ID: ${savedRequest._id}\n\nHaydovchilarga yuborildi. Takliflarni kuting...`, { reply_markup: keyboardsUtils.passengerMenu });
+    await ctx.reply(`✅ Буюртмангиз қабул қилинди!\n\nҲайдовчиларга юборилди. Таклифларни кутинг...`, { reply_markup: keyboardsUtils.passengerMenu });
 
     // Broadcast to drivers
     await conversation.external(async () => {

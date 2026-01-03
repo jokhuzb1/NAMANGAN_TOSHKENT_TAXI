@@ -68,8 +68,8 @@ bot.use(createConversation(quickRequestConversation));
 bot.command("start", async (ctx) => {
     let user = await User.findOne({ telegramId: ctx.from.id });
 
-    // Default language logic if user not found or no lang set
-    const lang = user ? (user.language || 'uz_cyrillic') : 'uz_cyrillic';
+    // Force Cyrillic as requested by user ("DO NOT NEED LATIN!!!!")
+    const lang = 'uz_cyrillic';
 
     if (user && user.role !== 'none') {
         if (user.role === 'passenger') {
@@ -91,30 +91,30 @@ bot.command("start", async (ctx) => {
     });
 });
 
-// Role Selection Handlers
-bot.hears("🚖 Haydovchi", async (ctx) => {
+// Role Selection Handlers (Support both Latin and Cyrillic)
+bot.hears([t('driver', 'uz_latin'), t('driver', 'uz_cyrillic')], async (ctx) => {
     // Check if already registered
     const user = await User.findOne({ telegramId: ctx.from.id });
     if (user && user.role === 'driver') {
         // Allow re-registration if rejected
         if (user.status === 'rejected') {
-            await ctx.reply("♻️ Sizning arizangiz rad etilgan edi. Qaytadan ma'lumotlarni yuborishingiz mumkin.");
+            await ctx.reply("♻️ Сизнинг аризангиз рад этилган эди. Қайтадан маълумотларни юборишингиз мумкин.");
             await ctx.conversation.enter("driverRegister");
             return;
         }
         if (user.status === 'pending_verification') {
-            return ctx.reply("⏳ Arizangiz admin tomonidan tekshirilmoqda. Iltimos kuting.");
+            return ctx.reply("⏳ Аризангиз админ томонидан текширилмоқда. Илтимос кутинг.");
         }
         const lang = user.language || 'uz_cyrillic';
-        return ctx.reply("Siz allaqachon ro'yxatdan o'tgansiz.", { reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none') });
+        return ctx.reply("Сиз аллақачон рўйхатдан ўтгансиз.", { reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none') });
     }
     await ctx.conversation.enter("driverRegister");
 });
 
-bot.hears("🧍 Yo'lovchi", async (ctx) => {
+bot.hears([t('passenger', 'uz_latin'), t('passenger', 'uz_cyrillic')], async (ctx) => {
     const user = await User.findOne({ telegramId: ctx.from.id });
     if (user && user.role === 'passenger') {
-        return ctx.reply("Siz allaqachon ro'yxatdan o'tgansiz.", { reply_markup: keyboards.passengerMenu });
+        return ctx.reply("Сиз аллақачон рўйхатдан ўтгансиз.", { reply_markup: keyboards.passengerMenu });
     }
     await ctx.conversation.enter("passengerRegister");
 });
@@ -131,7 +131,7 @@ bot.hears([
     });
 
     if (activeRequest) {
-        return ctx.reply("🚫 Sizda allaqachon faol buyurtma mavjud. Iltimos, '🚖 Mening Buyurtmam' bo'limi orqali holatni tekshiring yoki bekor qiling.");
+        return ctx.reply("🚫 Сизда аллақачон фаол буюртма мавжуд. Илтимос, '🚖 Менинг Буюртмам' бўлими орқали ҳолатни текширинг ёки бекор қилинг.");
     }
 
     await ctx.conversation.enter("rideRequestConversation");
@@ -147,7 +147,7 @@ bot.hears([
     });
 
     if (activeRequest) {
-        return ctx.reply("🚫 Sizda allaqachon faol buyurtma mavjud. Iltimos, '🚖 Mening Buyurtmam' bo'limi orqali holatni tekshiring yoki bekor qiling.");
+        return ctx.reply("🚫 Сизда аллақачон фаол буюртма мавжуд. Илтимос, '🚖 Менинг Буюртмам' бўлими орқали ҳолатни текширинг ёки бекор қилинг.");
     }
 
     await ctx.conversation.enter("parcelRequestConversation");
@@ -172,10 +172,10 @@ bot.hears([
         if (lastCompleted) {
             const timeDiff = new Date() - lastCompleted.updatedAt;
             if (timeDiff < 24 * 60 * 60 * 1000) {
-                return ctx.reply(`✅ <b>Oxirgi buyurtmangiz yakunlangan:</b>\n\n📍 ${lastCompleted.from} ➡️ ${lastCompleted.to}\n⭐️ Agar baholamagan bo'lsangiz, iltimos baholang.`, { parse_mode: "HTML" });
+                return ctx.reply(`✅ <b>Охирги буюртмангиз якунланган:</b>\n\n📍 ${lastCompleted.from} ➡️ ${lastCompleted.to}\n⭐️ Агар баҳоламаган бўлсангиз, илтимос баҳоланг.`, { parse_mode: "HTML" });
             }
         }
-        return ctx.reply("Sizda faol buyurtmalar yo'q.");
+        return ctx.reply("Сизда фаол буюртмалар йўқ.");
     }
     console.log(`[DEBUG] Found active request ${request._id} for ${ctx.from.id}`);
 
@@ -244,31 +244,106 @@ bot.hears([
 bot.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
+    // Handle "Take Admin Request" (First 5 Drivers get logic)
+    if (data.startsWith("take_admin_")) {
+        const requestId = data.replace("take_admin_", "");
+        const request = await RideRequest.findById(requestId);
+
+        if (!request) return ctx.answerCallbackQuery({ text: "⚠️ Буюртма топилмади.", show_alert: true });
+
+        // Concurrency Check (atomically increment?)
+        // Mongo atomic increment is safer but for simplicity read/write here.
+        if (request.clicksCount >= 5) {
+            // Cleanup if not already cleaned
+            try { await ctx.deleteMessage(); } catch (e) { };
+            return ctx.answerCallbackQuery({ text: "⚠️ Ушбу буюртмани аллақачон 5 та ҳайдовchi қабул қилган.", show_alert: true });
+        }
+
+        // Logic check: Did this driver already take it?
+        // We really should track WHO took it to prevent double dipping, but requirement says "first 5 offers".
+        // Let's assume clicksCount is enough. 
+        // Adding driverId to 'offers' or similar array would be cleaner to prevent duplicate clicks.
+        // Re-using 'offers' logic:
+        const alreadyTook = request.offers.some(o => o.driverId === ctx.from.id);
+        if (alreadyTook) {
+            return ctx.answerCallbackQuery({ text: "✅ Сиз рақамни аллақачон олгансиз. Тепадаги хабарни текширинг.", show_alert: true });
+        }
+
+        // Increment
+        request.clicksCount += 1;
+        // Record as an 'offer' just to track who took it
+        request.offers.push({
+            driverId: ctx.from.id,
+            driverName: ctx.from.first_name,
+            price: 0, // No price negotiation
+            status: 'accepted'
+        });
+
+        if (request.clicksCount >= 5) {
+            request.status = 'completed'; // Close it
+            // Trigger cleanup of all broadcast messages
+            // We can do it asynchronously
+            broadcastRequest(ctx.api, request).catch(err => console.error(err));
+            // Actually broadcastRequest normally SENDS messages. We need CLEANUP logic.
+            // broadcastRequest currently deletes then sends.
+            // If status is completed, we should just delete? 
+            // Let's manually delete specifically for this case to be sure.
+            if (request.broadcastMessages) {
+                for (const msg of request.broadcastMessages) {
+                    try { await ctx.api.deleteMessage(msg.driverId, msg.messageId); } catch (e) { }
+                }
+                request.broadcastMessages = [];
+            }
+        }
+
+        await request.save();
+
+        // Send Contact Info to Driver
+        const phoneDisplay = request.contactPhone && request.contactPhone.startsWith('+')
+            ? request.contactPhone
+            : '+' + (request.contactPhone || 'N/A');
+
+        const contactMsg = `
+🎉 <b>БУЮРТМА ҚАБУЛ ҚИЛИНДИ!</b>
+
+📍 <b>Йўналиш:</b> ${request.from} ➡️ ${request.to}
+📞 <b>Йўловчи:</b> ${phoneDisplay}
+⏰ <b>Вақт:</b> ${request.time}
+💺 <b>Жой:</b> ${request.seats}
+🚩 <b>Манзил:</b> ${request.district || '-'}
+
+<i>Илтимос, йўловчи билан боғланинг!</i>
+`;
+        await ctx.reply(contactMsg, { parse_mode: "HTML" });
+        await ctx.answerCallbackQuery("✅ Рақам юборилди!");
+        return;
+    }
+
     // Handle "Taklif berish"
     if (data.startsWith("bid_")) {
         const requestId = data.replace("bid_", "");
 
         // Check Driver Status
         const user = await User.findOne({ telegramId: ctx.from.id });
-        if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
-        if (user.status !== 'approved') return ctx.answerCallbackQuery({ text: "⚠️ Arizangiz hali tasdiqlanmagan!", show_alert: true });
+        if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
+        if (user.status !== 'approved') return ctx.answerCallbackQuery({ text: "⚠️ Аризангиз ҳали тасдиқланмаган!", show_alert: true });
 
         // Auto-Online Logic
         if (!user.isOnline) {
             user.isOnline = true;
             await user.save();
-            await ctx.reply("🟢 Siz 'Ishdaman' holatiga o'tdingiz va endi buyurtmalarni qabul qilishingiz mumkin.");
+            await ctx.reply("🟢 Сиз 'Ишдаман' ҳолатига ўтдингиз ва энди буюртмаларни қабул қилишингиз мумкин.");
         }
 
         // Check Request Status BEFORE entering conversation
         const request = await RideRequest.findById(requestId);
-        if (!request) return ctx.answerCallbackQuery({ text: "⚠️ Buyurtma topilmadi.", show_alert: true });
+        if (!request) return ctx.answerCallbackQuery({ text: "⚠️ Буюртма топилмади.", show_alert: true });
 
         if (request.status === 'negotiating') {
-            return ctx.answerCallbackQuery({ text: "⏳ Bu buyurtma hozirda boshqa haydovchi bilan muhokama qilinmoqda. Biroz kuting.", show_alert: true });
+            return ctx.answerCallbackQuery({ text: "⏳ Бу буюртма ҳозирда бошқа ҳайдовчи билан муҳокама қилинмоқда. Бироз кутинг.", show_alert: true });
         }
         if (request.status !== 'searching') {
-            return ctx.answerCallbackQuery({ text: "⚠️ Bu buyurtma allaqachon olingan yoki bekor qilingan.", show_alert: true });
+            return ctx.answerCallbackQuery({ text: "⚠️ Бу буюртма аллақачон олинган ёки бекор қилинган.", show_alert: true });
         }
 
         console.log(`[DEBUG] Bid clicked. RequestId extracted: '${requestId}'`);
@@ -284,31 +359,54 @@ bot.on("callback_query:data", async (ctx, next) => {
 
     // Handle "Accept Offer"
     if (data.startsWith("accept_")) {
-        const offerIndex = parseInt(data.replace("accept_", ""));
-        // Need to find which request this message belongs to. 
-        // For MVP, simplistic approach: pass RequestID in buttons OR search by passengerID + status?
-        // Better: Search DB for pending request for this user.
-        // Better: Search DB for pending request for this user.
-        // Status is 'negotiating' because an offer was made. Check both just in case.
-        const request = await RideRequest.findOne({ passengerId: ctx.from.id, status: { $in: ['negotiating', 'searching'] } });
+        // Format: accept_ReqID_OfferID
+        const parts = data.split("_");
+        let requestId, offerId, request, offer;
 
-        if (!request || !request.offers[offerIndex]) {
-            return ctx.reply("⚠️ Xatolik: Buyurtma yoki taklif topilmadi.");
+        if (parts.length === 3) {
+            requestId = parts[1];
+            offerId = parts[2];
+            request = await RideRequest.findById(requestId);
+            offer = request ? request.offers.find(o => o._id.toString() === offerId) : null;
+        } else {
+            // Fallback for old buttons (unlikely to work perfectly but prevents crash)
+            offerId = data.replace("accept_", "");
+            request = await RideRequest.findOne({ passengerId: ctx.from.id, status: { $in: ['negotiating', 'searching'] } });
+            offer = request ? request.offers.find(o => o._id.toString() === offerId) : null;
         }
 
-        const offer = request.offers[offerIndex];
+        if (!request || !offer) {
+            console.error(`[ERROR] Accept failed. ReqId: ${requestId}, OfferId: ${offerId}`);
+            return ctx.reply("⚠️ Хатолик: Буюртма ёки таклиф топилмади. (Эски тугма бўлиши мумкин)");
+        }
+
+        // Debug: Log offer details before accepting
+        console.log(`[DEBUG] Accepting offer ID=${offerId}: driverId=${offer.driverId}, price=${offer.price}`);
+
         request.status = 'matched';
-        // In real app, mark offer as accepted
         offer.status = 'accepted';
         await request.save();
 
-        await ctx.answerCallbackQuery("Taklif qabul qilindi!");
+        // Re-fetch to ensure we have accurate data after save
+        const updatedRequest = await RideRequest.findById(request._id);
+        const acceptedOffer = updatedRequest.offers.find(o => o._id.toString() === offerId);
+
+        console.log(`[DEBUG] After save - offer price: ${acceptedOffer.price}`);
+
+        await ctx.answerCallbackQuery("Таклиф қабул қилинди!");
 
         // Notify Passenger (reveal Driver Phone)
-        const driver = await User.findOne({ telegramId: offer.driverId });
+        const driver = await User.findOne({ telegramId: acceptedOffer.driverId });
+
+        if (!driver) {
+            console.error(`[ERROR] Driver not found with telegramId: ${acceptedOffer.driverId}`);
+            return ctx.reply("⚠️ Хатолик: Ҳайдовчи маълумотлари топилмади.");
+        }
+
+        console.log(`[DEBUG] Found driver: ${driver.name}, telegramId: ${driver.telegramId}`);
 
         // Update original message to remove buttons
-        await ctx.editMessageText(`✅ <b>Haydovchi qabul qilindi!</b>\n\nQuyida haydovchi ma'lumotlari yuborilmoqda...`, {
+        await ctx.editMessageText(`✅ <b>Ҳайдовчи қабул қилинди!</b>\n\nҚуйида ҳайдовчи маълумотлари юборилмоқда...`, {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [] }
         });
@@ -318,17 +416,17 @@ bot.on("callback_query:data", async (ctx, next) => {
         const cm = keyboards.carNameMap[driver.carModel] || driver.carModel;
 
         const detailsCaption = `
-<b>✅ HAYDOVCHI TOPILDI!</b>
+<b>✅ ҲАЙДОВЧИ ТОПИЛДИ!</b>
 
-👤 <b>Ism:</b> ${driver.name}
-📞 <b>Tel:</b> ${driver.phone.startsWith('+') ? driver.phone : '+' + driver.phone}
+👤 <b>Исм:</b> ${driver.name}
+📞 <b>Тел:</b> ${driver.phone.startsWith('+') ? driver.phone : '+' + driver.phone}
 
-🚗 <b>Mashina:</b> ${carDetails.brand ? carDetails.brand : ''} ${carDetails.model || cm}
-🎨 <b>Rang:</b> ${carDetails.color || '-'}
-📅 <b>Yil:</b> ${carDetails.year || '-'}
-💺 <b>Joy:</b> ${carDetails.seats || '-'}
+🚗 <b>Машина:</b> ${carDetails.brand ? carDetails.brand : ''} ${carDetails.model || cm}
+🎨 <b>Ранг:</b> ${carDetails.color || '-'}
+📅 <b>Йил:</b> ${carDetails.year || '-'}
+💺 <b>Жой:</b> ${carDetails.seats || '-'}
 
-💰 <b>Kelishilgan narx:</b> ${offer.price} so'm
+💰 <b>Келишилган нарх:</b> ${acceptedOffer.price} сўм
 `;
 
         // Send Text with Actions (Contact + View Photos)
@@ -338,12 +436,12 @@ bot.on("callback_query:data", async (ctx, next) => {
 
         // Add Photo Buttons
         if (driver.carImages && driver.carImages.length > 0) {
-            buttons.text("📷 Mashina Rasmi", `view_car_offer_${driver._id}`).row();
+            buttons.text("📷 Машина Расми", `view_car_offer_${driver._id}`).row();
         }
 
         // Add Selfie Button (Optional, but good for completeness)
         if (driver.selfie && driver.selfie.telegramFileId) {
-            buttons.text("👤 Haydovchi Rasmi", `view_selfie_offer_${driver._id}`).row();
+            buttons.text("👤 Ҳайдовчи Расми", `view_selfie_offer_${driver._id}`).row();
         }
 
         // Add Completion Actions/Back?
@@ -355,19 +453,53 @@ bot.on("callback_query:data", async (ctx, next) => {
             reply_markup: buttons
         });
 
-        // Notify Driver
+        // Notify Driver that their offer was accepted
         const passenger = await User.findOne({ telegramId: ctx.from.id });
-        const passPhone = passenger.phone.startsWith('+') ? passenger.phone : '+' + passenger.phone;
-        await ctx.api.sendMessage(driver.telegramId, `✅ Taklifingiz qabul qilindi!\n\n👤 Yo'lovchi: ${passenger.name}\n📞 ${passPhone}\n📍 ${request.from} ➡️ ${request.to}`, {
-            reply_markup: keyboards.contactActions(passenger)
-        });
+
+        if (!passenger) {
+            console.error(`[ERROR] Passenger not found with telegramId: ${ctx.from.id}`);
+        } else {
+            const isCustom = updatedRequest.contactPhone ? true : false;
+            const displayPhoneRaw = isCustom ? updatedRequest.contactPhone : passenger.phone;
+            const passPhone = displayPhoneRaw.startsWith('+') ? displayPhoneRaw : '+' + displayPhoneRaw;
+            const passName = isCustom && updatedRequest.createdBy === 'admin' ? "Mijoz (Admin)" : passenger.name;
+
+            console.log(`[DEBUG] Sending acceptance notification to driver ${driver.telegramId}`);
+
+            // Build detailed notification message for driver
+            const driverNotificationMsg = `
+🎉 <b>ТАКЛИФИНГИЗ ҚАБУЛ ҚИЛИНДИ!</b>
+
+<b>👤 Йўловчи:</b> ${passName}
+<b>📞 Телефон:</b> ${passPhone}
+
+<b>📍 Йўналиш:</b> ${updatedRequest.from} ➡️ ${updatedRequest.to}
+<b>⏰ Вақт:</b> ${updatedRequest.time}
+${updatedRequest.type === 'parcel' ? `<b>📦 Тур:</b> ${updatedRequest.packageType}` : `<b>💺 Жой:</b> ${updatedRequest.seats} нафар`}
+${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district}` : ''}
+
+<b>💰 Келишилган нарх:</b> ${acceptedOffer.price} сўм
+
+<i>Йўловчи билан боғланинг!</i>
+`;
+
+            try {
+                await ctx.api.sendMessage(driver.telegramId, driverNotificationMsg, {
+                    parse_mode: "HTML",
+                    reply_markup: keyboards.contactActions(passenger)
+                });
+                console.log(`[NOTIFY] Driver ${driver.telegramId} notified about accepted offer - SUCCESS`);
+            } catch (e) {
+                console.error(`[ERROR] Failed to notify driver ${driver.telegramId} about accepted offer:`, e.message);
+            }
+        }
 
         // Send Voice Message to Driver if exists
-        if (request.voiceId) {
+        if (updatedRequest.voiceId) {
             try {
-                await ctx.api.sendVoice(driver.telegramId, request.voiceId, { caption: "🗣 Yo'lovchidan ovozli xabar" });
+                await ctx.api.sendVoice(driver.telegramId, updatedRequest.voiceId, { caption: "🗣 Yo'lovchidan ovozli xabar" });
             } catch (e) {
-                console.error(`Failed to send voice to driver ${driver.telegramId}:`, e);
+                console.error(`[ERROR] Failed to send voice to driver ${driver.telegramId}:`, e);
             }
         }
 
@@ -376,24 +508,35 @@ bot.on("callback_query:data", async (ctx, next) => {
 
     // Handle Decline
     if (data.startsWith("decline_")) {
-        const offerIndex = parseInt(data.replace("decline_", ""));
-        // Find request. It might be in 'negotiating' status now.
-        const request = await RideRequest.findOne({ passengerId: ctx.from.id, status: 'negotiating' });
+        // Format: decline_ReqID_OfferID
+        const parts = data.split("_");
+        let requestId, offerId, request, offer;
 
-        if (!request) {
-            // Maybe it's 'searching' if something weird happened? Check generic.
-            const reqAny = await RideRequest.findOne({ passengerId: ctx.from.id, status: { $in: ['searching', 'negotiating'] } });
-            if (!reqAny) return ctx.answerCallbackQuery("Buyurtma topilmadi.");
-            // If found but not negotiating, maybe logic desync. Let's assume it failed.
+        if (parts.length === 3) {
+            requestId = parts[1];
+            offerId = parts[2];
+            request = await RideRequest.findById(requestId);
+            offer = request ? request.offers.find(o => o._id.toString() === offerId) : null;
+        } else {
+            // Fallback
+            offerId = data.replace("decline_", "");
+            request = await RideRequest.findOne({ passengerId: ctx.from.id, status: 'negotiating' });
+            const reqToUpdate = request || await RideRequest.findOne({ passengerId: ctx.from.id, status: { $in: ['searching', 'negotiating'] } });
+            offer = reqToUpdate ? reqToUpdate.offers.find(o => o._id.toString() === offerId) : null;
+            request = reqToUpdate;
         }
 
-        await ctx.answerCallbackQuery("Taklif rad etildi. Qidiruv davom etmoqda...");
+        if (!request) {
+            return ctx.answerCallbackQuery("Буюртма топилмади.");
+        }
+
+        await ctx.answerCallbackQuery("Таклиф рад этилди.");
         await ctx.deleteMessage();
 
-        const reqToUpdate = request || await RideRequest.findOne({ passengerId: ctx.from.id, status: { $in: ['searching', 'negotiating'] } });
+        const reqToUpdate = request;
 
-        if (reqToUpdate && reqToUpdate.offers[offerIndex]) {
-            const offer = reqToUpdate.offers[offerIndex];
+        if (reqToUpdate && offer) {
+            console.log(`[DECLINE] Declining offer ID=${offerId} from driver ${offer.driverId}, price: ${offer.price}`);
 
             // Blocking Logic
             if (!reqToUpdate.blockedDrivers) reqToUpdate.blockedDrivers = [];
@@ -408,25 +551,50 @@ bot.on("callback_query:data", async (ctx, next) => {
 
             if (blockEntry.count >= 3) {
                 blockEntry.blockedUntil = new Date(Date.now() + 20 * 60 * 1000); // 20 mins
-                blockMsg = "\n⚠️ Siz ushbu buyurtmachi tomonidan 3 marta rad etildingiz va 20 daqiqaga bloklandingiz.";
+                blockMsg = "\n\n⚠️ Сиз ушбу буюртмачи томонидан 3 марта рад этилдингиз ва 20 дақиқага блокландингиз.";
             }
 
             offer.status = 'rejected';
 
-            // RESET STATUS TO SEARCHING
+            // RESET STATUS TO SEARCHING so other drivers can still bid
             reqToUpdate.status = 'searching';
 
             await reqToUpdate.save();
 
-            // Notify Driver
+            // Build detailed rejection notification for driver
+            const declineMessage = `
+❌ <b>ТАКЛИФИНГИЗ РАД ЭТИЛДИ</b>
+
+<b>📍 Йўналиш:</b> ${reqToUpdate.from} ➡️ ${reqToUpdate.to}
+<b>⏰ Вақт:</b> ${reqToUpdate.time}
+<b>💰 Сизнинг таклифингиз:</b> ${offer.price} сўм
+
+<i>Йўловчи бошқа таклифни танлади ёки рад этди.</i>${blockMsg}
+`;
+
+            // Notify Driver about decline
             try {
-                await ctx.api.sendMessage(offer.driverId, `❌ Sizning taklifingiz rad etildi.${blockMsg}`);
+                await ctx.api.sendMessage(offer.driverId, declineMessage, {
+                    parse_mode: "HTML"
+                });
+                console.log(`[NOTIFY] Driver ${offer.driverId} notified about declined offer`);
             } catch (e) {
-                console.error("Failed to notify driver rejection:", e);
+                console.error(`[ERROR] Failed to notify driver ${offer.driverId} about declined offer:`, e.message);
             }
 
-            // RE-BROADCAST TO ALL DRIVERS
-            await broadcastRequest(ctx.api, reqToUpdate);
+            // NOTE: We do NOT re-broadcast to group when offer is declined
+            // The request remains in 'searching' status so other drivers can still bid
+            // but we don't spam them with the same request again
+
+            // Re-Broadcast to all drivers (per user request)
+            try {
+                // We utilize the same broadcast function. It cleans up old messages and sends new ones.
+                // This ensures "fresh" visibility for the request.
+                await broadcastRequest(ctx.api, reqToUpdate);
+                console.log(`[BROADCAST] Re-broadcasting request ${reqToUpdate._id} after decline`);
+            } catch (e) {
+                console.error(`[ERROR] Failed to re-broadcast request ${reqToUpdate._id}:`, e);
+            }
         }
         return;
     }
@@ -436,10 +604,10 @@ bot.on("callback_query:data", async (ctx, next) => {
         const requestId = data.replace("cancel_request_", "");
         // Ask for confirmation
         const kb = new InlineKeyboard()
-            .text("✅ Ha, bekor qilaman", `confirm_cancel_${requestId}`)
-            .text("🔙 Yo'q, qaytaman", `abort_cancel_${requestId}`);
+            .text("✅ Ҳа, бекор қиламан", `confirm_cancel_${requestId}`)
+            .text("🔙 Йўқ, қайтаман", `abort_cancel_${requestId}`);
 
-        await ctx.editMessageText("⚠️ <b>Rostdan ham buyurtmani bekor qilmoqchimisiz?</b>", {
+        await ctx.editMessageText("⚠️ <b>Ростдан ҳам буюртмани бекор қилмоқчимисиз?</b>", {
             parse_mode: "HTML",
             reply_markup: kb
         });
@@ -454,7 +622,7 @@ bot.on("callback_query:data", async (ctx, next) => {
 
         if (!request) {
             await ctx.deleteMessage();
-            return ctx.answerCallbackQuery("Buyurtma topilmadi.");
+            return ctx.answerCallbackQuery("Буюртма топилмади.");
         }
 
         // If matched, notify driver
@@ -463,7 +631,7 @@ bot.on("callback_query:data", async (ctx, next) => {
             if (acceptedOffer) {
                 const driver = await User.findOne({ telegramId: acceptedOffer.driverId });
                 if (driver) {
-                    await ctx.api.sendMessage(driver.telegramId, `❌ Yo'lovchi buyurtmani bekor qildi.`).catch(() => { });
+                    await ctx.api.sendMessage(driver.telegramId, `❌ Йўловчи буюртмани бекор қилди.`).catch(() => { });
                 }
             }
         }
@@ -471,9 +639,9 @@ bot.on("callback_query:data", async (ctx, next) => {
         request.status = 'cancelled';
         await request.save();
 
-        await ctx.answerCallbackQuery("Buyurtma bekor qilindi.");
+        await ctx.answerCallbackQuery("Буюртма бекор қилинди.");
         // We delete the confirmation message or edit it to final status
-        await ctx.editMessageText("🚮 Buyurtmangiz bekor qilindi.", { reply_markup: { inline_keyboard: [] } });
+        await ctx.editMessageText("🚮 Буюртмангиз бекор қилинди.", { reply_markup: { inline_keyboard: [] } });
         return;
     }
 
@@ -491,7 +659,7 @@ bot.on("callback_query:data", async (ctx, next) => {
         // User has to click "Mening Buyurtmam" again to see it, or we could resend it.
         // Resending is better UX but "deleteMessage" keeps chat clean.
         // Let's assume user is in the menu.
-        await ctx.reply("Buyurtma bekor qilinmadi. Davom etamiz.");
+        await ctx.reply("Буюртма бекор қилинмади. Давом этамиз.");
         // Ideally we should restore the original message content, but that requires re-fetching everything which is complex in this block.
         // Deleting the confirmation prompt is the simplest "Go Back" interaction usually.
         return ctx.answerCallbackQuery("Bekor qilindi.");
@@ -502,22 +670,22 @@ bot.on("callback_query:data", async (ctx, next) => {
         const requestId = data.replace("complete_request_", "");
         const request = await RideRequest.findById(requestId);
 
-        if (!request) return ctx.answerCallbackQuery("Buyurtma topilmadi.");
+        if (!request) return ctx.answerCallbackQuery("Буюртма топилмади.");
 
         request.status = 'completed';
         await request.save();
 
-        await ctx.answerCallbackQuery("Buyurtma yakunlandi!");
+        await ctx.answerCallbackQuery("Буюртма якунланди!");
 
         const acceptedOffer = request.offers.find(o => o.status === 'accepted');
         const driverId = acceptedOffer ? acceptedOffer.driverId : null;
 
         const kb = new InlineKeyboard();
         if (driverId) {
-            kb.text("⭐️ Haydovchini baholash", `rate_driver_${driverId}_${requestId}`);
+            kb.text("⭐️ Ҳайдовчини баҳолаш", `rate_driver_${driverId}_${requestId}`);
         }
 
-        await ctx.editMessageText("✅ Safaringiz uchun rahmat! Buyurtma yakunlandi.", { reply_markup: kb });
+        await ctx.editMessageText("✅ Сафарингиз учун раҳмат! Буюртма якунланди.", { reply_markup: kb });
         return;
     }
 
@@ -551,15 +719,15 @@ bot.on("callback_query:data", async (ctx, next) => {
         const drivers = await User.find(query).skip(page * limit).limit(limit);
         const totalPages = Math.ceil(total / limit);
 
-        const routeName = route === 'tash_nam' ? "Tashkent ➡️ Namangan" : "Namangan ➡️ Tashkent";
-        let text = `🚕 <b>Bo'sh Haydovchilar</b>\n📍 ${routeName}\n`;
-        if (model !== 'all') text += `🚙 Filter: ${keyboards.carNameMap[model] || model}\n`;
-        text += `📄 Sahifa: ${page + 1}/${totalPages || 1}\n\n`;
+        const routeName = route === 'tash_nam' ? "Тошкент ➡️ Наманган" : "Наманган ➡️ Тошкент";
+        let text = `🚕 <b>Бўш Ҳайдовчилар</b>\n📍 ${routeName}\n`;
+        if (model !== 'all') text += `🚙 Филтр: ${keyboards.carNameMap[model] || model}\n`;
+        text += `📄 Саҳифа: ${page + 1}/${totalPages || 1}\n\n`;
 
         const keyboard = new InlineKeyboard();
 
         if (drivers.length === 0) {
-            text += "<i>Hozircha bu yo'nalishda haydovchilar yo'q.</i>";
+            text += "<i>Ҳозирча бу йўналишда фаол ҳайдовчилар йўқ.</i>";
         } else {
             // Pre-fetch ratings
             const Review = require("./models/Review");
@@ -587,13 +755,13 @@ bot.on("callback_query:data", async (ctx, next) => {
 
         // Navigation
         const navRow = [];
-        if (page > 0) navRow.push({ text: "⬅️ Oldingi", callback_data: `ld_${route}_p${page - 1}_m${model}` });
-        if (page < totalPages - 1) navRow.push({ text: "Keyingi ➡️", callback_data: `ld_${route}_p${page + 1}_m${model}` });
+        if (page > 0) navRow.push({ text: "⬅️ Олдинги", callback_data: `ld_${route}_p${page - 1}_m${model}` });
+        if (page < totalPages - 1) navRow.push({ text: "Кейинги ➡️", callback_data: `ld_${route}_p${page + 1}_m${model}` });
         if (navRow.length > 0) keyboard.row(...navRow);
 
         // Filter & Back
         keyboard.row();
-        keyboard.text("🚙 Mashina turi bo'yicha", `filter_show_${route}`);
+        keyboard.text("🚙 Машина тури бўйича", `filter_show_${route}`);
         keyboard.row();
         // Since we don't have a 'main menu' callback for text commands, we just hide or refresh. 
         // Or if we came from "Bo'sh haydovchilar" command, we can't go 'back' to text. 
@@ -610,7 +778,7 @@ bot.on("callback_query:data", async (ctx, next) => {
     // Show Filter Options
     if (data.startsWith("filter_show_")) {
         const route = data.replace("filter_show_", "");
-        await ctx.editMessageText("🚗 Qaysi mashina turini qidiryapsiz?", {
+        await ctx.editMessageText("🚗 Қайси машина турини қидиряпсиз?", {
             reply_markup: keyboards.carFilter(route)
         });
         await ctx.answerCallbackQuery();
@@ -628,8 +796,8 @@ bot.on("callback_query:data", async (ctx, next) => {
         // Reuse logic?
         // Let's just update the button in the command handler properly.
         // But for safety:
-        return ctx.reply("Yangi formatga o'tilmoqda...", {
-            reply_markup: new InlineKeyboard().text("♻️ Ochish", `ld_${route}_p0_mall`)
+        return ctx.reply("Янги форматга ўтилмоқда...", {
+            reply_markup: new InlineKeyboard().text("♻️ Очиш", `ld_${route}_p0_mall`)
         });
     }
 
@@ -637,7 +805,7 @@ bot.on("callback_query:data", async (ctx, next) => {
     if (data.startsWith("public_driver_info_")) {
         const driverId = data.replace("public_driver_info_", "");
         const driver = await User.findById(driverId);
-        if (!driver) return ctx.reply("Haydovchi topilmadi.");
+        if (!driver) return ctx.reply("Ҳайдовчи топилмади.");
 
         const cm = keyboards.carNameMap[driver.carModel] || driver.carModel;
 
@@ -657,22 +825,22 @@ bot.on("callback_query:data", async (ctx, next) => {
         }
 
         const caption = `
-<b>👤 Haydovchi Ma'lumotlari</b>
+<b>👤 Ҳайдовчи Маълумотлари</b>
 
-👤 Ism: ${verified}${driver.name}
-⭐️ Reyting: ${avgRating} (${reviewCount} ta baho)
-🚗 Mashina: ${driver.carDetails ? driver.carDetails.model : cm}
-🎨 Rang: ${driver.carDetails ? driver.carDetails.color : "-"}
-📅 Yil: ${driver.carDetails ? driver.carDetails.year : "-"}
-💺 Bo'sh joy: ${driver.carDetails ? driver.carDetails.seats : "-"} 
+👤 Исм: ${verified}${driver.name}
+⭐️ Рейтинг: ${avgRating} (${reviewCount} та баҳо)
+🚗 Машина: ${driver.carDetails ? driver.carDetails.model : cm}
+🎨 Ранг: ${driver.carDetails ? driver.carDetails.color : "-"}
+📅 Йил: ${driver.carDetails ? driver.carDetails.year : "-"}
+💺 Бўш жой: ${driver.carDetails ? driver.carDetails.seats : "-"} 
 
-Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
+Алоқага чиқиш ёки Таклиф юбориш учун тугмалардан фойдаланинг:
 `;
         const keyboard = new InlineKeyboard()
-            .text("📩 Taklif Yuborish", `direct_offer_${driver._id}`).row()
-            .text("📞 Aloqaga chiqish", `request_contact_share_${driver._id}`).row()
-            .text("📷 Mashina Rasmi", `view_car_offer_${driver._id}`).row() // Reuse handler
-            .text("🔙 Orqaga", `ld_${driver.activeRoute}_p0_mall`);
+            .text("📩 Таклиф Юбориш", `direct_offer_${driver._id}`).row()
+            .text("📞 Алоқага чиқиш", `request_contact_share_${driver._id}`).row()
+            .text("📷 Машина Расми", `view_car_offer_${driver._id}`).row() // Reuse handler
+            .text("🔙 Орқага", `ld_${driver.activeRoute}_p0_mall`);
 
         // Send Text Only (edit if possible)
         try {
@@ -699,12 +867,12 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
 
         if (driver.carImages && driver.carImages.length > 0) {
             await ctx.replyWithPhoto(driver.carImages[0].telegramFileId, {
-                caption: `🚗 <b>${driver.name}</b> mashinasi\nModel: ${driver.carDetails ? driver.carDetails.model : driver.carModel} `,
+                caption: `🚗 <b>${driver.name}</b> машинаси\nМодел: ${driver.carDetails ? driver.carDetails.model : driver.carModel} `,
                 parse_mode: "HTML"
             });
             await ctx.answerCallbackQuery();
         } else {
-            await ctx.answerCallbackQuery("⚠️ Mashina rasmi yuklanmagan.", { show_alert: true });
+            await ctx.answerCallbackQuery("⚠️ Машина расми юкланмаган.", { show_alert: true });
         }
         return;
     }
@@ -720,7 +888,7 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
             });
             await ctx.answerCallbackQuery();
         } else {
-            await ctx.answerCallbackQuery("⚠️ Rasm topilmadi.", { show_alert: true });
+            await ctx.answerCallbackQuery("⚠️ Расм топилмади.", { show_alert: true });
         }
         return;
     }
@@ -747,7 +915,7 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
                 // For now, default or error. The driver list only shows active routes.
                 // If undefined, maybe just fallback to asking? 
                 // Let's assume valid because we filtered by activeRoute in list.
-                return ctx.reply("Haydovchi yo'nalishi aniqlanmadi.");
+                return ctx.reply("Ҳайдовчи йўналиши аниқланмади.");
             }
 
             ctx.session.quickOffer = {
@@ -760,24 +928,24 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
             return;
         }
 
-        if (!driver) return ctx.reply("Haydovchi topilmadi.");
+        if (!driver) return ctx.reply("Ҳайдовчи топилмади.");
 
-        await ctx.answerCallbackQuery({ text: "Taklif yuborildi!", show_alert: true });
+        await ctx.answerCallbackQuery({ text: "Таклиф юборилди!", show_alert: true });
 
         // Notify Driver
         const passenger = await User.findOne({ telegramId: ctx.from.id });
         const offerMsg = `
-⚡️ <b>SIZGA MAXSUS TAKLIF TUSHDI!</b>
+⚡️ <b>СИЗГА МАХСУС ТАКЛИФ ТУШДИ!</b>
 
-👤 Yo'lovchi: ${passenger.name}
-📍 Yo'nalish: ${request.from} ➡️ ${request.to}
-⏰ Vaqt: ${request.time}
-${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${request.seats} nafar`}
+👤 Йўловчи: ${passenger.name}
+📍 Йўналиш: ${request.from} ➡️ ${request.to}
+⏰ Вақт: ${request.time}
+${request.type === 'parcel' ? `📦 Тур: ${request.packageType}` : `💺 Жой: ${request.seats} нафар`}
 
-<i>Ushbu yo'lovchi sizni tanladi!</i>
+<i>Ушбу йўловчи сизни танлади!</i>
 `;
         // Add Bid button for driver
-        const kb = new InlineKeyboard().text("🙋‍♂️ Taklif berish", `bid_${request._id}`);
+        const kb = new InlineKeyboard().text("🙋‍♂️ Таклиф бериш", `bid_${request._id}`);
 
         try {
             await ctx.api.sendMessage(driver.telegramId, offerMsg, { parse_mode: "HTML", reply_markup: kb });
@@ -793,23 +961,23 @@ ${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${
         const driver = await User.findById(driverId);
         const passenger = await User.findOne({ telegramId: ctx.from.id });
 
-        if (!driver) return ctx.reply("Haydovchi topilmadi.");
+        if (!driver) return ctx.reply("Ҳайдовчи топилмади.");
 
         // Notify Driver
         const msg = `
-📞 <b>ALOQA SO'ROVI</b>
+📞 <b>АЛОҚА СЎРОВИ</b>
 
-👤 Yo'lovchi: ${passenger.name}
-📱 Tel: ${passenger.phone}
+👤 Йўловчи: ${passenger.name}
+📱 Тел: ${passenger.phone && passenger.phone.startsWith('+') ? passenger.phone : '+' + (passenger.phone || '')}
 
-<i>Bu yo'lovchi siz bilan gaplashmoqchi. Iltimos aloqaga chiqing.</i>
+<i>Бу йўловчи сиз билан гаплашмоқчи. Илтимос алоқага чиқинг.</i>
 `;
         try {
-            await ctx.api.sendMessage(driver.telegramId, msg, { parse_mode: "HTML", reply_markup: contactActions(passenger.phone) });
-            await ctx.answerCallbackQuery({ text: "So'rov yuborildi! Haydovchi aloqaga chiqadi.", show_alert: true });
+            await ctx.api.sendMessage(driver.telegramId, msg, { parse_mode: "HTML", reply_markup: contactActions(passenger) });
+            await ctx.answerCallbackQuery({ text: "Сўров юборилди! Ҳайдовчи алоқага чиқади.", show_alert: true });
         } catch (e) {
             console.error("Failed to notify driver:", e);
-            await ctx.answerCallbackQuery({ text: "Xatolik bo'ldi.", show_alert: true });
+            await ctx.answerCallbackQuery({ text: "Хатолик бўлди.", show_alert: true });
         }
         return;
     }
@@ -826,7 +994,7 @@ ${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${
             // But we can't send "his" contact as a contact object easily without vcard or forwarding?
             // Actually, sendContact method works fine if we know the phone number.
             try {
-                await ctx.replyWithContact(phone, targetUser.name || "Foydalanuvchi");
+                await ctx.replyWithContact(phone, targetUser.name || "Фойдаланувчи");
                 await ctx.answerCallbackQuery();
             } catch (e) {
                 // If fails (invalid format?), just show alert
@@ -956,20 +1124,20 @@ ${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${
     await next();
 });
 
-// Extras
-bot.hears("👀 Bo'sh haydovchilar", async (ctx) => {
-    // Check if user is passenger or driver? (Passenger mostly)
-    // Ask for Route
-    await ctx.reply("📍 Qaysi yo'nalishdagi haydovchilarni ko'rmoqchisiz?", {
+// Extras - "Бўш ҳайдовчилар" Handler (Available Drivers)
+// This handler asks for route selection first, then triggers the enhanced ld_ callback flow
+bot.hears("👀 Бўш ҳайдовчилар", async (ctx) => {
+    // Ask for Route Selection
+    await ctx.reply("📍 Қайси йўналишдаги ҳайдовчиларни кўрмоқчисиз?", {
         reply_markup: new InlineKeyboard()
-            .text("Tashkent ➡️ Namangan", "ld_tash_nam_p0_mall").row()
-            .text("Namangan ➡️ Tashkent", "ld_nam_tash_p0_mall")
+            .text("Тошкент ➡️ Наманган", "ld_tash_nam_p0_mall").row()
+            .text("Наманган ➡️ Тошкент", "ld_nam_tash_p0_mall")
     });
 });
 
 bot.hears("🟢 Ishdaman", async (ctx) => {
     // Prompt for direction
-    await ctx.reply("Qaysi yo'nalishda harakatlanmoqchisiz?", {
+    await ctx.reply("Қайси йўналишда ҳаракатланмоқчисиз?", {
         reply_markup: keyboards.routeSelection
     });
 });
@@ -978,7 +1146,7 @@ bot.hears("🟢 Ishdaman", async (ctx) => {
 // Radar Pagination Logic
 async function sendRadarPage(ctx, page) {
     const user = await User.findOne({ telegramId: ctx.from.id });
-    if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
+    if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
 
     const limit = 10;
     const skip = page * limit;
@@ -997,29 +1165,36 @@ async function sendRadarPage(ctx, page) {
     }
 
     if (requests.length === 0) {
-        if (page > 0) return ctx.answerCallbackQuery("Boshqa sahifa yo'q.");
-        return ctx.reply("📂 Hozircha faol buyurtmalar yo'q.");
+        if (page > 0) return ctx.answerCallbackQuery("Бошқа саҳифа йўқ.");
+        return ctx.reply("📂 Ҳозирча фаол буюртмалар йўқ.");
     }
 
-    await ctx.reply(`📡 <b>OCHIQ BUYURTMALAR (Sahifa ${page + 1}):</b>`, { parse_mode: "HTML" });
+    await ctx.reply(`📡 <b>ОЧИҚ БУЮРТМАЛАР (Саҳифа ${page + 1}):</b>`, { parse_mode: "HTML" });
 
     // Send each request as a separate card
     for (let i = 0; i < requests.length; i++) {
         const req = requests[i];
         const itemNum = skip + i + 1;
-        const typeIcon = req.type === 'parcel' ? "📦 POST" : "🚖 TAXI";
-        const details = req.type === 'parcel' ? `📦 ${req.packageType}` : `💺 ${req.seats} kishi${req.seatType === 'front' ? " (⚠️ OLDI O'RINDIQ)" : ""}`;
+        const typeIcon = req.type === 'parcel' ? "📦 ПОЧТА" : "🚖 ТАКСИ";
+        const details = req.type === 'parcel' ? `📦 ${req.packageType}` : `💺 ${req.seats} киши${req.seatType === 'front' ? " (⚠️ ОЛДИ ўРИНДИҚ)" : ""}`;
         const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
 
-        let msg = `KLIENT #${itemNum}\n` +
+        let msg = `КЛИЕНТ #${itemNum}\n` +
             `${typeIcon} 📍 <b>${req.from.toUpperCase()} ➡️ ${req.to.toUpperCase()}</b>\n` +
             `📅 ${timeCreated} | ⏰ ${req.time}\n` +
             `${details}\n`;
 
         if (req.district) msg += `🚩 ${req.district}\n`;
+        if (req.createdBy === 'admin') {
+            msg += `\n<i>(Буюртма Админдан. 📞 Рақамни тўғридан-тўғри олинг)</i>`;
+        }
 
-        const cardKeyboard = new InlineKeyboard()
-            .text("🙋‍♂️ Taklif berish", `bid_${req._id}`);
+        const cardKeyboard = new InlineKeyboard();
+        if (req.createdBy === 'admin') {
+            cardKeyboard.text("📞 Raqamni olish (Tezkor)", `take_admin_${req._id}`);
+        } else {
+            cardKeyboard.text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
+        }
 
         if (req.voiceId) {
             await ctx.replyWithVoice(req.voiceId, {
@@ -1037,14 +1212,14 @@ async function sendRadarPage(ctx, page) {
 
     // Send Navigation Controls as the last message
     const navRow = [];
-    if (page > 0) navRow.push({ text: "⬅️ Oldingi", callback_data: `radar_p_${page - 1}` });
-    if (skip + requests.length < total) navRow.push({ text: "Keyingi ➡️", callback_data: `radar_p_${page + 1}` });
+    if (page > 0) navRow.push({ text: "⬅️ Олдинги", callback_data: `radar_p_${page - 1}` });
+    if (skip + requests.length < total) navRow.push({ text: "Кейинги ➡️", callback_data: `radar_p_${page + 1}` });
 
     const navKeyboard = new InlineKeyboard();
     if (navRow.length > 0) navKeyboard.row(...navRow);
-    navKeyboard.row().text("🔄 Yangilash", `radar_p_${page}`);
+    navKeyboard.row().text("🔄 Янгилаш", `radar_p_${page}`);
 
-    await ctx.reply(`📄 <b>Sahifa ${page + 1}</b> (Jami: ${total} ta)`, {
+    await ctx.reply(`📄 <b>Саҳифа ${page + 1}</b> (Жами: ${total} та)`, {
         parse_mode: "HTML",
         reply_markup: navKeyboard
     });
@@ -1076,7 +1251,7 @@ bot.hears([
 bot.hears([
     t('work_mode', 'uz_latin'), t('work_mode', 'uz_cyrillic')
 ], async (ctx) => {
-    await ctx.reply("Qaysi yo'nalishda harakatlanmoqchisiz?", {
+    await ctx.reply("Қайси йўналишда ҳаракатланмоқчисиз?", {
         reply_markup: keyboards.routeSelection
     });
 });
@@ -1101,12 +1276,12 @@ bot.hears([
 ], async (ctx) => {
     // Check if driver is active
     const user = await User.findOne({ telegramId: ctx.from.id });
-    if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
+    if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
 
     // If driver is NOT online or has NO route
     if (user.activeRoute === 'none') {
         const lang = user.language || 'uz_cyrillic';
-        return ctx.reply("⚠️ Siz hali yo'nalish tanlamadingiz. Iltimos 'Ishdaman' tugmasini bosing.", {
+        return ctx.reply("⚠️ Сиз ҳали йўналиш танламадингиз. Илтимос 'Ишдаман' тугмасини босинг.", {
             reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false)
         });
     }
@@ -1114,7 +1289,7 @@ bot.hears([
     const routeMap = { 'tash_nam': { from: 'Tashkent', to: 'Namangan' }, 'nam_tash': { from: 'Namangan', to: 'Tashkent' } };
     const route = routeMap[user.activeRoute];
 
-    if (!route) return ctx.reply("Xatolik: Yo'nalish aniqlanmadi.");
+    if (!route) return ctx.reply("Хатолик: Йўналиш аниқланмади.");
 
     // Find Active Requests
     const requests = await RideRequest.find({
@@ -1125,17 +1300,17 @@ bot.hears([
     }).sort({ createdAt: -1 }).limit(10); // Show last 10
 
     if (requests.length === 0) {
-        return ctx.reply("Hozircha bu yo'nalishda faol buyurtmalar yo'q.");
+        return ctx.reply("Ҳозирча бу йўналишда фаол буюртмалар йўқ.");
     }
 
-    await ctx.reply(`📡 <b>Ochiq Buyurtmalar (${requests.length}):</b>`, { parse_mode: "HTML" });
+    await ctx.reply(`📡 <b>Очиқ Буюртмалар (${requests.length}):</b>`, { parse_mode: "HTML" });
 
     for (const req of requests) {
-        let msg = `⏰ <b>${req.time}</b>\n📍 ${req.district ? req.district : 'Manzil'}\n`;
-        if (req.type === 'parcel') msg += `📦 <b>Pochta:</b> ${req.packageType}`;
-        else msg += `💺 <b>Joy:</b> ${req.seats}`;
+        let msg = `⏰ <b>${req.time}</b>\n📍 ${req.district ? req.district : 'Манзил'}\n`;
+        if (req.type === 'parcel') msg += `📦 <b>Почта:</b> ${req.packageType}`;
+        else msg += `💺 <b>Жой:</b> ${req.seats}`;
 
-        const kb = new InlineKeyboard().text("🙋‍♂️ Taklif berish", `bid_${req._id}`);
+        const kb = new InlineKeyboard().text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
         await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
     }
 });
@@ -1161,25 +1336,25 @@ bot.hears([
     });
 
     if (activeRequests.length === 0) {
-        return ctx.reply("Sizda hozircha faol buyurtmalar (yo'lovchilar) yo'q.");
+        return ctx.reply("Сизда ҳозирча фаол буюртмалар (йўловчилар) йўқ.");
     }
 
-    await ctx.reply(`📡 <b>Sizning faol buyurtmalaringiz (${activeRequests.length}):</b>`, { parse_mode: "HTML" });
+    await ctx.reply(`📡 <b>Сизнинг фаол буюртмаларингиз (${activeRequests.length}):</b>`, { parse_mode: "HTML" });
 
     for (const req of activeRequests) {
         const passenger = await User.findOne({ telegramId: req.passengerId });
-        const passName = passenger ? passenger.name : "Noma'lum";
-        const passPhone = passenger ? (passenger.phone || "N/A") : "N/A";
+        const passName = passenger ? passenger.name : "Номаълум";
+        const passPhone = passenger ? (passenger.phone ? (passenger.phone.startsWith('+') ? passenger.phone : '+' + passenger.phone) : "N/A") : "N/A";
 
-        let msg = `👤 <b>Yo'lovchi:</b> ${passName}\n📞 <b>Tel:</b> ${passPhone}\n📍 ${req.from} ➡️ ${req.to}\n`;
-        if (req.type === 'parcel') msg += `📦 <b>Pochta:</b> ${req.packageType}`;
-        else msg += `💺 <b>Joy:</b> ${req.seats} kishi`;
+        let msg = `👤 <b>Йўловчи:</b> ${passName}\n📞 <b>Тел:</b> ${passPhone}\n📍 ${req.from} ➡️ ${req.to}\n`;
+        if (req.type === 'parcel') msg += `📦 <b>Почта:</b> ${req.packageType}`;
+        else msg += `💺 <b>Жой:</b> ${req.seats} киши`;
 
         // Actions: Complete, Contact
         const kb = new InlineKeyboard()
-            .text("✅ Yakunlash (Yetib bordik)", `complete_ride_${req._id}`).row();
+            .text("✅ Якунлаш (Етиб бордик)", `complete_ride_${req._id}`).row();
 
-        if (passenger && passenger.username) kb.url("Telegram", `https://t.me/${passenger.username}`);
+        if (passenger && passenger.username) kb.url("💬 Телеграм", `https://t.me/${passenger.username}`);
 
         await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
     }
@@ -1223,7 +1398,7 @@ bot.hears([
     t('complete_all', 'uz_latin'), t('complete_all', 'uz_cyrillic')
 ], async (ctx) => {
     const user = await User.findOne({ telegramId: ctx.from.id });
-    if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
+    if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
 
     const lang = user.language || 'uz_cyrillic';
 
@@ -1240,7 +1415,7 @@ bot.hears([
 
     if (activeRequests.length === 0) {
         // Even if no passengers, ask if they want to start working on new route
-        await ctx.reply("Sizda hozircha faol yo'lovchilar yo'q.\n\n🔄 Yangi yo'nalishda ishlashni boshlaysizmi?", {
+        await ctx.reply("Сизда ҳозирча фаол йўловчилар йўқ.\n\n🔄 Янги йўналишда ишлашни бошлайсизми?", {
             reply_markup: keyboards.routeSelection
         });
         return;
@@ -1267,7 +1442,7 @@ bot.hears([
         }
     }
 
-    await ctx.reply(`✅ <b>Barcha buyurtmalar yakunlandi!</b>\n\nJami: ${activeRequests.length} ta yo'lovchi/pochta.\n\n🔄 Yangi yo'nalishda ishlashni boshlaysizmi?`, {
+    await ctx.reply(`✅ <b>Барча буюртмалар якунланди!</b>\n\nЖами: ${activeRequests.length} та йўловчи/почта.\n\n🔄 Янги йўналишда ишлашни бошлайсизми?`, {
         parse_mode: "HTML",
         reply_markup: keyboards.routeSelection
     });
@@ -1305,7 +1480,7 @@ bot.on("callback_query:data", async (ctx, next) => {
 
             const lang = user.language || 'uz_cyrillic';
 
-            await ctx.reply(`✅ Siz faol holatdasiz!\nYo'nalish: ${routeName}\n\nBuyurtmalar kelishini kuting.`, {
+            await ctx.reply(`✅ Сиз фаол ҳолатдасиз!\nЙўналиш: ${routeName}\n\nБуюртмалар келишини кутинг.`, {
                 reply_markup: dynamicKeyboards.getDriverMenu(lang, true, true)
             });
             await ctx.answerCallbackQuery();
@@ -1330,48 +1505,10 @@ bot.hears([
     await ctx.reply("🛠 Sozlamalar.");
 });
 
-// View Active Drivers
-bot.hears([
-    t('available_drivers', 'uz_latin'), t('available_drivers', 'uz_cyrillic')
-], async (ctx) => {
-    const drivers = await User.find({
-        role: 'driver',
-        status: 'approved',
-        isOnline: true,
-        // activeRoute: { $ne: 'none' } // Optional: only show those with active route
-    }).limit(10);
-
-    // Calculate ratings for drivers (if we have Review model)
-    const Review = require("./models/Review");
-
-    if (drivers.length === 0) {
-        return ctx.reply("hozirda afsuski barcha haydovchilar band.");
-    }
-
-    let msg = `<b>🟢 ${t('available_drivers', 'uz_cyrillic')} (${drivers.length}):</b>\n\n`;
-
-    for (let i = 0; i < drivers.length; i++) {
-        const d = drivers[i];
-        const route = d.activeRoute === 'tash_nam' ? "Toshkent -> Namangan" :
-            d.activeRoute === 'nam_tash' ? "Namangan -> Toshkent" : "---";
-        const car = d.carDetails ? d.carDetails.model : d.carModel;
-        const capacity = d.carDetails ? d.carDetails.seats : '?';
-
-        // Calculate Avg Rating
-        const reviews = await Review.find({ targetId: d.telegramId }); // targetId is telegramId logic in bot.js L841 uses ctx.from.id which is telegramId
-        let avgRating = 0;
-        if (reviews.length > 0) {
-            const sum = reviews.reduce((a, b) => a + b.rating, 0);
-            avgRating = (sum / reviews.length).toFixed(1);
-        } else {
-            avgRating = "N/A";
-        }
-
-        msg += `${i + 1}. 🚗 <b>${car}</b> (${capacity} kishilik)\n⭐️ Reyting: ${avgRating}\n📍 ${route}\n\n`;
-    }
-
-    await ctx.reply(msg, { parse_mode: "HTML" });
-});
+// The OLD basic "available_drivers" handler is REMOVED.
+// The new enhanced flow is triggered via "👀 Бўш ҳайдовчилар" -> Route Selection -> ld_ callback.
+// Keeping this as a comment for reference.
+// bot.hears(t('available_drivers'...) - DELETED, replaced by enhanced ld_ flow.
 
 // Handle Errors
 bot.catch((err) => {

@@ -1,5 +1,7 @@
 
 const { Bot, session, InlineKeyboard, Keyboard, InputFile } = require("grammy");
+const { conversations, createConversation } = require("@grammyjs/conversations");
+const { addAdminConversation, adminCreateOrderConversation } = require("./conversations/adminOperations");
 const config = require("./config");
 const User = require("./models/User");
 const Admin = require("./models/Admin");
@@ -13,6 +15,9 @@ const adminBot = new Bot(config.ADMIN_BOT_TOKEN || "FAKE_TOKEN_FOR_INIT_IF_MISSI
 
 // Middleware
 adminBot.use(session({ initial: () => ({}) }));
+adminBot.use(conversations());
+adminBot.use(createConversation(addAdminConversation));
+adminBot.use(createConversation(adminCreateOrderConversation));
 
 // Auth Middleware: Check if user is Admin
 adminBot.use(async (ctx, next) => {
@@ -33,50 +38,68 @@ adminBot.use(async (ctx, next) => {
 
 // --- Admin Menu Keyboard ---
 const adminMenu = new Keyboard()
-    .text("🕒 Kutilayotganlar").text("✅ Tasdiqlanganlar")
+    .text("🕒 Кутилаётганлар").text("✅ Тасдиқланганлар")
     .row()
-    .text("❌ Rad etilganlar").text("📣 Hammaga Xabar")
+    .text("❌ Рад этилганлар").text("📣 Ҳаммага Хабар")
+    .row()
+    .text("🚖 Буюртма Яратиш").text("📋 Менинг Буюртмаларим")
+    .row()
+    .text("👨‍✈️ Админлар").text("➕ Админ Қўшиш")
     .resized();
 
 // Commands
 adminBot.command("start", async (ctx) => {
-    await ctx.reply(`👨‍✈️ Admin Paneliga xush kelibsiz, ${ctx.from.first_name} !\n\nYangi haydovchilar so'rovlari avtomatik ravishda shu yerga keladi.`, {
+    await ctx.reply(`👨‍✈️ Админ Панелига хуш келибсиз, ${ctx.from.first_name}!\n\nЯнги ҳайдовчилар сўровлари автоматик равишда шу ерга келади.`, {
         reply_markup: adminMenu
     });
 });
 
 adminBot.command("add_admin", async (ctx) => {
     const id = parseInt(ctx.match);
-    if (isNaN(id)) return ctx.reply("⚠️ ID noto'g'ri. Foydalanish: /add_admin 123456789");
+    if (isNaN(id)) return ctx.reply("⚠️ ID нотўғри. Фойдаланиш: /add_admin 123456789");
 
     const exists = await Admin.findOne({ telegramId: id });
-    if (exists) return ctx.reply("⚠️ Bu foydalanuvchi allaqachon admin.");
+    if (exists) return ctx.reply("⚠️ Бу фойдаланувчи аллақачон админ.");
 
     await Admin.create({ telegramId: id, addedBy: ctx.from.id, name: "Unknown" });
-    await ctx.reply(`✅ Admin qo'shildi (ID: ${id}).`);
+    await ctx.reply(`✅ Админ қўшилди (ID: ${id}).`);
 });
 
+// Admin list with remove buttons
 adminBot.command("admins", async (ctx) => {
+    await showAdminList(ctx);
+});
+
+// Handler for "👨‍✈️ Админлар" button
+adminBot.hears("👨‍✈️ Админлар", async (ctx) => {
+    await showAdminList(ctx);
+});
+
+async function showAdminList(ctx) {
     const admins = await Admin.find({});
-    let message = "<b>👨‍✈️ Adminlar Ro'yxati:</b>\n\n";
+    let message = "<b>👨‍✈️ Админлар Рўйхати:</b>\n\n";
 
     // Add Super Admin from config
     const superAdminId = config.ADMIN_ID;
     if (superAdminId) {
-        message += `👑 <b>Super Admin:</b> <code>${superAdminId}</code>\n`;
+        message += `👑 <b>Супер Админ:</b> <code>${superAdminId}</code>\n`;
     }
+
+    const keyboard = new InlineKeyboard();
 
     if (admins.length > 0) {
-        message += "\n<b>Boshqa Adminlar:</b>\n";
+        message += "\n<b>Бошқа Админлар:</b>\n";
         admins.forEach((admin, index) => {
-            message += `${index + 1}. ${admin.name || "Noma'lum"} (ID: <code>${admin.telegramId}</code>)\n`;
+            message += `${index + 1}. ${admin.name || "Номаълум"} (ID: <code>${admin.telegramId}</code>)\n`;
+            // Add remove button for each admin (except super admin)
+            keyboard.text(`🗑 ${admin.telegramId}`, `remove_admin_${admin._id}`).row();
         });
     } else {
-        message += "\n<i>Boshqa adminlar yo'q.</i>";
+        message += "\n<i>Бошқа админлар йўқ.</i>";
     }
 
-    await ctx.reply(message, { parse_mode: "HTML" });
-});
+    await ctx.reply(message, { parse_mode: "HTML", reply_markup: keyboard });
+}
 
 // Reusable List Function
 async function listDrivers(ctx, status, title) {
@@ -85,13 +108,12 @@ async function listDrivers(ctx, status, title) {
     let keyboard = new InlineKeyboard();
 
     if (drivers.length === 0) {
-        text += "<i>Hozircha bo'sh.</i>";
+        text += "<i>Ҳозирча бўш.</i>";
     } else {
         drivers.forEach(d => {
             keyboard.text(`${d.name} (${d.phone})`, `driver_info_${d._id}`).row();
         });
     }
-    // No back button needed if using ReplyKeyboard menu
 
     // Check if called via callback or message
     if (ctx.callbackQuery) {
@@ -105,26 +127,56 @@ async function listDrivers(ctx, status, title) {
     }
 }
 
-// Menu Handlers
-adminBot.hears("🕒 Kutilayotganlar", async (ctx) => listDrivers(ctx, 'pending_verification', "🕒 <b>Kutilayotgan Haydovchilar:</b>"));
-adminBot.hears("✅ Tasdiqlanganlar", async (ctx) => listDrivers(ctx, 'approved', "✅ <b>Tasdiqlangan Haydovchilar:</b>"));
-adminBot.hears("❌ Rad etilganlar", async (ctx) => listDrivers(ctx, 'rejected', "❌ <b>Rad etilgan Haydovchilar:</b>"));
+// Menu Handlers - Cyrillic
+adminBot.hears("🕒 Кутилаётганлар", async (ctx) => listDrivers(ctx, 'pending_verification', "🕒 <b>Кутилаётган Ҳайдовчилар:</b>"));
+adminBot.hears("✅ Тасдиқланганлар", async (ctx) => listDrivers(ctx, 'approved', "✅ <b>Тасдиқланган Ҳайдовчилар:</b>"));
+adminBot.hears("❌ Рад этилганлар", async (ctx) => listDrivers(ctx, 'rejected', "❌ <b>Рад этилган Ҳайдовчилар:</b>"));
+adminBot.hears("➕ Админ Қўшиш", async (ctx) => await ctx.conversation.enter("addAdminConversation"));
+adminBot.hears("🚖 Буюртма Яратиш", async (ctx) => await ctx.conversation.enter("adminCreateOrderConversation"));
+adminBot.hears("📋 Менинг Буюртмаларим", async (ctx) => {
+    // Find requests created by admin
+    const requests = await require("./models/RideRequest").find({ createdBy: 'admin', status: 'searching' }).sort({ createdAt: -1 }).limit(10);
+
+    if (requests.length === 0) {
+        return ctx.reply("❌ Сизда фаол админ-буюртмалари йўқ.");
+    }
+
+    await ctx.reply(`📋 <b>Фаол Админ Буюртмалари (${requests.length} та):</b>`, { parse_mode: "HTML" });
+
+    for (const req of requests) {
+        const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+        const msg = `
+📍 <b>${req.from} ➡️ ${req.to}</b>
+📞 ${req.contactPhone}
+⏰ ${req.time}
+💺 ${req.seats} kishi
+👀 Ko'rildi: ${req.clicksCount}/5
+📅 ${timeCreated}
+`;
+        const kb = new InlineKeyboard()
+            .text("🔄 Qayta Broadcast", `admin_rebroadcast_${req._id}`)
+            .text("🗑 O'chirish", `admin_delete_${req._id}`);
+
+        await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
+    }
+});
+
 
 // Broadcast Handler
-adminBot.hears("📣 Hammaga Xabar", async (ctx) => {
+adminBot.hears("📣 Ҳаммага Хабар", async (ctx) => {
     ctx.session.step = 'broadcast';
-    await ctx.reply("📢 <b>Xabarni yuboring:</b>\n\n(Matn, rasm, video yoki boshqa turdagi xabarni yuborishingiz mumkin).", {
+    await ctx.reply("📢 <b>Хабарни юборинг:</b>\n\n(Матн, расм, видео ёки бошқа турдаги хабарни юборишингиз мумкин).", {
         parse_mode: "HTML",
         reply_markup: {
-            keyboard: [[{ text: "🔙 Bekor qilish" }]],
+            keyboard: [[{ text: "🔙 Бекор қилиш" }]],
             resize_keyboard: true
         }
     });
 });
 
-adminBot.hears("🔙 Bekor qilish", async (ctx) => {
+adminBot.hears("🔙 Бекор қилиш", async (ctx) => {
     ctx.session.step = null;
-    await ctx.reply("❌ Xabar yuborish bekor qilindi.", { reply_markup: adminMenu });
+    await ctx.reply("❌ Хабар юбориш бекор қилинди.", { reply_markup: adminMenu });
 });
 
 // Handle Broadcast Message
@@ -161,10 +213,26 @@ adminBot.on("message", async (ctx, next) => {
 adminBot.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
+    // Remove Admin Handler
+    if (data.startsWith("remove_admin_")) {
+        const adminId = data.replace("remove_admin_", "");
+        try {
+            await Admin.findByIdAndDelete(adminId);
+            await ctx.answerCallbackQuery("✅ Админ ўчирилди!");
+            await ctx.deleteMessage();
+            // Refresh the list
+            await showAdminList(ctx);
+        } catch (e) {
+            console.error(e);
+            await ctx.answerCallbackQuery("❌ Хатолик юз берди.");
+        }
+        return;
+    }
+
     if (data.startsWith("approve_")) {
         const userId = data.replace("approve_", "");
         const user = await User.findById(userId);
-        if (!user) return ctx.reply("⚠️ Foydalanuvchi topilmadi.");
+        if (!user) return ctx.reply("⚠️ Фойдаланувчи топилмади.");
 
         user.status = 'approved';
         user.isApproved = true;
@@ -374,6 +442,40 @@ adminBot.on("callback_query:data", async (ctx, next) => {
     if (data === "drivers_menu") {
         await ctx.reply("📂 Qaysi toifadagi haydovchilarni ko'rmoqchisiz?", { reply_markup: adminMenu });
         await ctx.answerCallbackQuery();
+        return;
+    }
+
+    // Admin Managing Orders
+    if (data.startsWith("admin_delete_")) {
+        const reqId = data.replace("admin_delete_", "");
+        const req = await require("./models/RideRequest").findById(reqId);
+        if (req) {
+            req.status = 'cancelled';
+            await req.save();
+            await ctx.editMessageText("🗑 Bu buyurtma o'chirildi.");
+        } else {
+            await ctx.answerCallbackQuery("Buyurtma topilmadi.");
+        }
+        return;
+    }
+
+    if (data.startsWith("admin_rebroadcast_")) {
+        const reqId = data.replace("admin_rebroadcast_", "");
+        const req = await require("./models/RideRequest").findById(reqId);
+        if (req) {
+            try {
+                const { broadcastRequest } = require("./utils/broadcastUtils");
+                await ctx.answerCallbackQuery("🔄 Broadcast boshlandi...");
+                // Force admin flag
+                await broadcastRequest(adminBot.mainBot.api, req, { isAdmin: true });
+                await ctx.reply("✅ Qayta broadcast qilindi!");
+            } catch (e) {
+                console.error(e);
+                await ctx.reply("❌ Xatolik: " + e.message);
+            }
+        } else {
+            await ctx.answerCallbackQuery("Buyurtma topilmadi.");
+        }
         return;
     }
 

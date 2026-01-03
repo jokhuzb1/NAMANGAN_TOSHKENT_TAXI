@@ -2,20 +2,23 @@ const { keyboards } = require("../utils/keyboards");
 const User = require("../models/User");
 const keyboardsUtils = require("../utils/keyboards");
 const adminBot = require("../adminBot");
+const { t } = require("../utils/i18n_fixed");
 
 async function passengerRegister(conversation, ctx) {
     // 1. Ask for Phone
-    await ctx.reply("Iltimos, telefon raqamingizni yuboring:", { reply_markup: keyboardsUtils.requestContact });
+    await ctx.reply("Илтимос, телефон рақамингизни юборинг:", { reply_markup: keyboardsUtils.requestContact });
 
     const responseCtx = await conversation.waitFor(["message:contact", "message:text"]);
+    const msgText = responseCtx.message?.text || "";
 
-    if (responseCtx.message.text === "❌ Bekor qilish") {
-        await ctx.reply("❌ Ro'yxatdan o'tish bekor qilindi.", { reply_markup: keyboardsUtils.roleSelection });
+    // Check for cancel (both Latin and Cyrillic)
+    if (msgText === t('cancel', 'uz_latin') || msgText === t('cancel', 'uz_cyrillic')) {
+        await ctx.reply("❌ Рўйхатдан ўтиш бекор қилинди.\n\nИлтимос, ролингизни танланг:", { reply_markup: keyboardsUtils.roleSelection });
         return;
     }
 
     if (!responseCtx.message.contact) {
-        await ctx.reply("Iltimos, telefon raqam tugmasini bosing yoki bekor qiling.");
+        await ctx.reply("Илтимос, телефон рақам тугмасини босинг ёки бекор қилинг.", { reply_markup: keyboardsUtils.requestContact });
         return; // Simple exit for now or we could loop, but let's just return to avoid stuck state
     }
 
@@ -33,7 +36,7 @@ async function passengerRegister(conversation, ctx) {
         await user.save();
     });
 
-    await ctx.reply("✅ Ro'yxatdan o'tdingiz! Qayerga boramiz?", { reply_markup: keyboardsUtils.passengerMenu });
+    await ctx.reply("✅ Рўйхатдан ўтдингиз! Қаерга борамиз?", { reply_markup: keyboardsUtils.passengerMenu });
 }
 
 async function driverRegister(conversation, ctx) {
@@ -82,16 +85,18 @@ async function driverRegister(conversation, ctx) {
     // Step 1: Phone
     let phone = data.phone;
     if (step < 1) {
-        await ctx.reply("🚖 Haydovchi bo'lib ishlash uchun telefon raqamingizni yuboring:", { reply_markup: keyboardsUtils.requestContact });
+        await ctx.reply("🚖 Ҳайдовчи бўлиб ишлаш учун телефон рақамингизни юборинг:", { reply_markup: keyboardsUtils.requestContact });
         const phoneCtx = await conversation.waitFor(["message:contact", "message:text"]);
+        const phoneText = phoneCtx.message?.text || "";
 
-        if (phoneCtx.message.text === "❌ Bekor qilish") {
-            await ctx.reply("❌ Ro'yxatdan o'tish bekor qilindi.", { reply_markup: keyboardsUtils.roleSelection });
+        // Check for cancel (both Latin and Cyrillic)
+        if (phoneText === t('cancel', 'uz_latin') || phoneText === t('cancel', 'uz_cyrillic')) {
+            await ctx.reply("❌ Рўйхатдан ўтиш бекор қилинди.\n\nИлтимос, ролингизни танланг:", { reply_markup: keyboardsUtils.roleSelection });
             return;
         }
 
         if (!phoneCtx.message.contact) {
-            await ctx.reply("Iltimos, telefon raqam tugmasini bosing.");
+            await ctx.reply("Илтимос, телефон рақам тугмасини босинг.", { reply_markup: keyboardsUtils.requestContact });
             return;
         }
 

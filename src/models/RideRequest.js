@@ -31,6 +31,9 @@ const rideRequestSchema = new mongoose.Schema({
         driverId: Number,
         messageId: Number
     }],
+    contactPhone: { type: String }, // For admin-created requests
+    createdBy: { type: String, enum: ['passenger', 'admin'], default: 'passenger' },
+    clicksCount: { type: Number, default: 0 }, // Track how many drivers took the number (max 5)
     createdAt: { type: Date, default: Date.now },
 });
 
