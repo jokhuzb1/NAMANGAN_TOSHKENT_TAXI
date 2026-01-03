@@ -33,7 +33,7 @@ async function broadcastRequest(api, request) {
 
     const typeIcon = request.type === 'parcel' ? "📦 POST" : "🚖 TAXI";
     const details = request.type === 'parcel' ? `📦 ${request.packageType}` : `💺 ${request.seats} kishi${request.seatType === 'front' ? " (⚠️ OLDI O'RINDIQ)" : ""}`;
-    const timeNow = new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
 
     const msgText = `🆕 <b>Yangi Buyurtma!</b>\n` +
         `📅 ${timeNow}\n\n` +
@@ -47,10 +47,19 @@ async function broadcastRequest(api, request) {
         if (driver.telegramId === request.passengerId) continue;
 
         try {
-            const sentMsg = await api.sendMessage(driver.telegramId, msgText, {
-                reply_markup: keyboards.driverBid(request._id),
-                parse_mode: "HTML"
-            });
+            let sentMsg;
+            if (request.parcelImage) {
+                sentMsg = await api.sendPhoto(driver.telegramId, request.parcelImage, {
+                    caption: msgText,
+                    reply_markup: keyboards.driverBid(request._id),
+                    parse_mode: "HTML"
+                });
+            } else {
+                sentMsg = await api.sendMessage(driver.telegramId, msgText, {
+                    reply_markup: keyboards.driverBid(request._id),
+                    parse_mode: "HTML"
+                });
+            }
 
             // Track Message
             request.broadcastMessages.push({

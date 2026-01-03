@@ -28,6 +28,12 @@ const userSchema = new mongoose.Schema({
         telegramFileUniqueId: String,
         uploadedAt: Date
     }],
+    verificationDocuments: {
+        licenseFront: { telegramFileId: String },
+        licenseBack: { telegramFileId: String },
+        passport: { telegramFileId: String }
+    },
+    isVerified: { type: Boolean, default: false },
 
     // Legacy field for backward compatibility if needed, but new flow uses carDetails.model
     carModel: { type: String },
@@ -40,7 +46,8 @@ const userSchema = new mongoose.Schema({
 
     // Registration Progress Tracking
     registrationStep: { type: Number, default: 0 },
-    registrationData: { type: Object, default: {} }
+    registrationData: { type: Object, default: {} },
+    language: { type: String, enum: ['uz_latin', 'uz_cyrillic'], default: 'uz_latin' }
 });
 
 module.exports = mongoose.model('User', userSchema);

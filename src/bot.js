@@ -9,9 +9,12 @@ const { rideRequestConversation } = require("./conversations/rideRequest");
 const { parcelRequestConversation } = require("./conversations/parcelRequest");
 const { driverBidConversation } = require("./conversations/driverBid");
 const { driverSettings, passengerSettings } = require("./conversations/settings");
+const { quickRequestConversation } = require("./conversations/quickRequest");
 const { contactActions } = require("./utils/keyboards");
 const { contextMap } = require("./utils/contextMap");
 const { broadcastRequest } = require("./utils/broadcastUtils");
+const { t } = require("./utils/i18n_fixed");
+const dynamicKeyboards = require("./utils/keyboardsDynamic");
 
 // DB Connection moved to index.js
 
@@ -59,29 +62,32 @@ bot.use(createConversation(parcelRequestConversation));
 bot.use(createConversation(driverBidConversation));
 bot.use(createConversation(driverSettings));
 bot.use(createConversation(passengerSettings));
+bot.use(createConversation(quickRequestConversation));
 
 // Commands
 bot.command("start", async (ctx) => {
-    const user = await User.findOne({ telegramId: ctx.from.id });
+    let user = await User.findOne({ telegramId: ctx.from.id });
+
+    // Default language logic if user not found or no lang set
+    const lang = user ? (user.language || 'uz_cyrillic') : 'uz_cyrillic';
 
     if (user && user.role !== 'none') {
         if (user.role === 'passenger') {
-            return ctx.reply("Xush kelibsiz, yo'lovchi!", { reply_markup: keyboards.passengerMenu });
+            return ctx.reply(t('welcome', lang), { reply_markup: dynamicKeyboards.getPassengerMenu(lang) });
         } else if (user.role === 'driver') {
             if (user.status === 'approved') {
-                return ctx.reply("Xush kelibsiz, haydovchi!", { reply_markup: keyboards.driverMenu });
+                return ctx.reply(t('welcome', lang), { reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none') });
             } else if (user.status === 'rejected') {
-                // Reset keyboard to allow re-register
-                return ctx.reply("❌ Sizning arizangiz rad etilgan. Qaytadan urinib ko'rishingiz mumkin.", { reply_markup: keyboards.roleSelection });
+                return ctx.reply("❌ " + t('cancel', lang), { reply_markup: dynamicKeyboards.getRoleSelection(lang) });
             } else {
-                return ctx.reply("⏳ Arizangiz ko'rib chiqilmoqda...", { reply_markup: { remove_keyboard: true } });
+                return ctx.reply("⏳ ...", { reply_markup: { remove_keyboard: true } });
             }
         }
     }
 
-    await ctx.reply(`👋 <b>Assalomu alaykum!</b>\n\n<b>Namangan-Toshkent-Namangan</b> yo'nalishidagi eng qulay taksi va pochta botiga xush kelibsiz.\n\n🚖 <b>Yo'lovchilar uchun:</b> Uydan chiqmay turib taksi buyurtma qiling.\n📦 <b>Pochta yuboruvchilar uchun:</b> Pochtangizni ishonchli haydovchilar orqali yuboring.\n🚙 <b>Haydovchilar uchun:</b> Mijozlarni tez va oson toping.\n\nIltimos, davom etish uchun o'z rolingizni tanlang: 👇`, {
+    await ctx.reply(t('welcome', lang) + "\n\n" + t('role_select_title', lang), {
         parse_mode: "HTML",
-        reply_markup: keyboards.roleSelection
+        reply_markup: dynamicKeyboards.getRoleSelection(lang)
     });
 });
 
@@ -99,7 +105,8 @@ bot.hears("🚖 Haydovchi", async (ctx) => {
         if (user.status === 'pending_verification') {
             return ctx.reply("⏳ Arizangiz admin tomonidan tekshirilmoqda. Iltimos kuting.");
         }
-        return ctx.reply("Siz allaqachon ro'yxatdan o'tgansiz.", { reply_markup: keyboards.driverMenu });
+        const lang = user.language || 'uz_cyrillic';
+        return ctx.reply("Siz allaqachon ro'yxatdan o'tgansiz.", { reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none') });
     }
     await ctx.conversation.enter("driverRegister");
 });
@@ -113,7 +120,10 @@ bot.hears("🧍 Yo'lovchi", async (ctx) => {
 });
 
 // Passenger Handlers
-bot.hears("🚕 Taksi buyurtma qilish", async (ctx) => {
+// Passenger Handlers
+bot.hears([
+    t('order_taxi', 'uz_latin'), t('order_taxi', 'uz_cyrillic')
+], async (ctx) => {
     // Check for active request
     const activeRequest = await RideRequest.findOne({
         passengerId: ctx.from.id,
@@ -127,7 +137,9 @@ bot.hears("🚕 Taksi buyurtma qilish", async (ctx) => {
     await ctx.conversation.enter("rideRequestConversation");
 });
 
-bot.hears("📦 Pochta yuborish", async (ctx) => {
+bot.hears([
+    t('send_parcel', 'uz_latin'), t('send_parcel', 'uz_cyrillic')
+], async (ctx) => {
     // Check for active request
     const activeRequest = await RideRequest.findOne({
         passengerId: ctx.from.id,
@@ -141,15 +153,29 @@ bot.hears("📦 Pochta yuborish", async (ctx) => {
     await ctx.conversation.enter("parcelRequestConversation");
 });
 
-bot.hears("🚖 Mening Buyurtmam", async (ctx) => {
+// Mening Buyurtmam (Using i18n triggers)
+bot.hears([
+    t('my_orders', 'uz_latin'), t('my_orders', 'uz_cyrillic')
+], async (ctx) => {
     const request = await RideRequest.findOne({
         passengerId: ctx.from.id,
         status: { $in: ['searching', 'matched'] }
     }).sort({ createdAt: -1 });
 
     if (!request) {
-        console.log(`[DEBUG] No active request found for ${ctx.from.id}`);
-        return ctx.reply("sizda faol buyurtmalar yo'q.");
+        // Check for recently completed request (last 24 hours)
+        const lastCompleted = await RideRequest.findOne({
+            passengerId: ctx.from.id,
+            status: 'completed'
+        }).sort({ createdAt: -1 });
+
+        if (lastCompleted) {
+            const timeDiff = new Date() - lastCompleted.updatedAt;
+            if (timeDiff < 24 * 60 * 60 * 1000) {
+                return ctx.reply(`✅ <b>Oxirgi buyurtmangiz yakunlangan:</b>\n\n📍 ${lastCompleted.from} ➡️ ${lastCompleted.to}\n⭐️ Agar baholamagan bo'lsangiz, iltimos baholang.`, { parse_mode: "HTML" });
+            }
+        }
+        return ctx.reply("Sizda faol buyurtmalar yo'q.");
     }
     console.log(`[DEBUG] Found active request ${request._id} for ${ctx.from.id}`);
 
@@ -160,10 +186,10 @@ bot.hears("🚖 Mening Buyurtmam", async (ctx) => {
     // For POCHTA, we do NOT show seats. For Passenger, we do.
     let seatsInfo = "";
     if (request.type !== 'parcel') {
-        seatsInfo = `� Joy: ${request.seats}\n`;
+        seatsInfo = ` Joy: ${request.seats}\n`;
     } else {
         // Option to show package type here or not? User said "if POCHTA we do not need to selec seats or show on the offer".
-        // Maybe "show on the offer" implies he doesn't want "Seats: ...". 
+        // Maybe "show on the offer" implies he doesn't want "Joy" line. 
         // Showing "Tur: box" might still be useful? Let's keep Package Type line but definitely no "Joy" line.
         seatsInfo = `📦 Tur: ${request.packageType}\n`;
     }
@@ -191,7 +217,8 @@ bot.hears("🚖 Mening Buyurtmam", async (ctx) => {
             const driver = await User.findOne({ telegramId: acceptedOffer.driverId });
             if (driver) {
                 message += `\n➖➖➖➖➖➖➖➖\n`;
-                message += `<b>👤 Haydovchi:</b> ${driver.name}\n`;
+                const verified = driver.isVerified ? "✅" : "";
+                message += `<b>👤 Haydovchi:</b> ${driver.name} ${verified}\n`;
                 message += `📞 Tel: ${driver.phone.startsWith('+') ? driver.phone : '+' + driver.phone}\n`;
                 message += `🚗 Mashina: ${driver.carModel}\n`;
                 message += `💰 Narx: ${acceptedOffer.price} so'm`;
@@ -481,7 +508,16 @@ bot.on("callback_query:data", async (ctx, next) => {
         await request.save();
 
         await ctx.answerCallbackQuery("Buyurtma yakunlandi!");
-        await ctx.editMessageText("✅ Safaringiz uchun rahmat! Buyurtma yakunlandi.", { reply_markup: { inline_keyboard: [] } });
+
+        const acceptedOffer = request.offers.find(o => o.status === 'accepted');
+        const driverId = acceptedOffer ? acceptedOffer.driverId : null;
+
+        const kb = new InlineKeyboard();
+        if (driverId) {
+            kb.text("⭐️ Haydovchini baholash", `rate_driver_${driverId}_${requestId}`);
+        }
+
+        await ctx.editMessageText("✅ Safaringiz uchun rahmat! Buyurtma yakunlandi.", { reply_markup: kb });
         return;
     }
 
@@ -525,10 +561,28 @@ bot.on("callback_query:data", async (ctx, next) => {
         if (drivers.length === 0) {
             text += "<i>Hozircha bu yo'nalishda haydovchilar yo'q.</i>";
         } else {
-            drivers.forEach(d => {
+            // Pre-fetch ratings
+            const Review = require("./models/Review");
+
+            for (const d of drivers) {
                 const cm = keyboards.carNameMap[d.carModel] || d.carModel;
-                keyboard.text(`👤 ${d.name} | ${cm}`, `public_driver_info_${d._id}`).row();
-            });
+                const verified = d.isVerified ? "✅ " : "";
+
+                // Calculate Rating
+                let avgRating = "N/A";
+                try {
+                    const reviews = await Review.find({ targetId: d.telegramId });
+                    if (reviews.length > 0) {
+                        const sum = reviews.reduce((a, b) => a + b.rating, 0);
+                        avgRating = (sum / reviews.length).toFixed(1);
+                    }
+                } catch (e) { console.error(e); }
+
+                const starPart = avgRating !== 'N/A' ? ` | ⭐️ ${avgRating}` : '';
+
+                keyboard.text(`🚗 ${verified}${cm}${starPart}`, `public_driver_info_${d._id}`)
+                    .text("📩", `direct_offer_${d._id}`).row();
+            }
         }
 
         // Navigation
@@ -587,10 +641,26 @@ bot.on("callback_query:data", async (ctx, next) => {
 
         const cm = keyboards.carNameMap[driver.carModel] || driver.carModel;
 
+        const verified = driver.isVerified ? "✅ " : "";
+        let avgRating = "N/A";
+        let reviewCount = 0;
+        try {
+            const Review = require("./models/Review");
+            const reviews = await Review.find({ targetId: driver.telegramId });
+            if (reviews.length > 0) {
+                const sum = reviews.reduce((a, b) => a + b.rating, 0);
+                avgRating = (sum / reviews.length).toFixed(1);
+                reviewCount = reviews.length;
+            }
+        } catch (e) {
+            console.error("Review fetch error:", e);
+        }
+
         const caption = `
 <b>👤 Haydovchi Ma'lumotlari</b>
 
-👤 Ism: ${driver.name}
+👤 Ism: ${verified}${driver.name}
+⭐️ Reyting: ${avgRating} (${reviewCount} ta baho)
 🚗 Mashina: ${driver.carDetails ? driver.carDetails.model : cm}
 🎨 Rang: ${driver.carDetails ? driver.carDetails.color : "-"}
 📅 Yil: ${driver.carDetails ? driver.carDetails.year : "-"}
@@ -629,7 +699,7 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
 
         if (driver.carImages && driver.carImages.length > 0) {
             await ctx.replyWithPhoto(driver.carImages[0].telegramFileId, {
-                caption: `🚗 <b>${driver.name}</b> mashinasi\nModel: ${driver.carDetails ? driver.carDetails.model : driver.carModel}`,
+                caption: `🚗 <b>${driver.name}</b> mashinasi\nModel: ${driver.carDetails ? driver.carDetails.model : driver.carModel} `,
                 parse_mode: "HTML"
             });
             await ctx.answerCallbackQuery();
@@ -656,19 +726,41 @@ Aloqaga chiqish yoki Taklif yuborish uchun tugmalardan foydalaning:
     }
 
     // 3. Direct Offer
+    // 3. Direct Offer
     if (data.startsWith("direct_offer_")) {
         const driverId = data.replace("direct_offer_", "");
+        const driver = await User.findById(driverId);
+
         // Check active request
         const request = await RideRequest.findOne({ passengerId: ctx.from.id, status: 'searching' });
 
         if (!request) {
-            return ctx.answerCallbackQuery({ text: "⚠️ Sizda faol buyurtma yo'q. Avval buyurtma yarating!", show_alert: true });
+            // Prompt user to create quick request
+            await ctx.deleteMessage();
+
+            // Infer route from driver's active route
+            const routeMap = { 'tash_nam': { from: 'Tashkent', to: 'Namangan' }, 'nam_tash': { from: 'Namangan', to: 'Tashkent' } };
+            const routeInfo = routeMap[driver.activeRoute];
+
+            // Fallback if no specific route (unlikely for active list, but safe check)
+            if (!routeInfo) {
+                // For now, default or error. The driver list only shows active routes.
+                // If undefined, maybe just fallback to asking? 
+                // Let's assume valid because we filtered by activeRoute in list.
+                return ctx.reply("Haydovchi yo'nalishi aniqlanmadi.");
+            }
+
+            ctx.session.quickOffer = {
+                driverId: driverId,
+                from: routeInfo.from,
+                to: routeInfo.to
+            };
+
+            await ctx.conversation.enter("quickRequestConversation");
+            return;
         }
 
-        const driver = await User.findById(driverId);
         if (!driver) return ctx.reply("Haydovchi topilmadi.");
-
-        // Check if already offered? (Skip for now)
 
         await ctx.answerCallbackQuery({ text: "Taklif yuborildi!", show_alert: true });
 
@@ -718,6 +810,30 @@ ${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${
         } catch (e) {
             console.error("Failed to notify driver:", e);
             await ctx.answerCallbackQuery({ text: "Xatolik bo'ldi.", show_alert: true });
+        }
+        return;
+    }
+
+    // 5. Show Phone Contact
+    if (data.startsWith("show_contact_")) {
+        const targetUserId = data.replace("show_contact_", "");
+        const targetUser = await User.findById(targetUserId);
+
+        if (targetUser && targetUser.phone) {
+            const phone = targetUser.phone.startsWith('+') ? targetUser.phone : '+' + targetUser.phone;
+            // Send contact or just alert
+            // Sharing contact is better as it allows "Add to contacts"
+            // But we can't send "his" contact as a contact object easily without vcard or forwarding?
+            // Actually, sendContact method works fine if we know the phone number.
+            try {
+                await ctx.replyWithContact(phone, targetUser.name || "Foydalanuvchi");
+                await ctx.answerCallbackQuery();
+            } catch (e) {
+                // If fails (invalid format?), just show alert
+                await ctx.answerCallbackQuery({ text: `📞 Tel: ${phone}`, show_alert: true });
+            }
+        } else {
+            await ctx.answerCallbackQuery({ text: "⚠️ Raqam topilmadi.", show_alert: true });
         }
         return;
     }
@@ -800,6 +916,43 @@ ${request.type === 'parcel' ? `📦 Tur: ${request.packageType}` : `💺 Joy: ${
         }
     }
 
+    // Rating Handler
+    if (data.startsWith("rate_driver_")) {
+        const parts = data.replace("rate_driver_", "").split("_");
+        const driverId = parts[0];
+        const reqId = parts[1];
+
+        const kb = new InlineKeyboard();
+        [1, 2, 3, 4, 5].forEach(star => {
+            kb.text(star + " ⭐️", `rate_save_${driverId}_${reqId}_${star}`);
+        });
+
+        await ctx.editMessageText("Haydovchini necha yulduz bilan baholaysiz?", { reply_markup: kb });
+        await ctx.answerCallbackQuery();
+        return;
+    }
+
+    if (data.startsWith("rate_save_")) {
+        const parts = data.replace("rate_save_", "").split("_");
+        const driverId = parts[0];
+        const reqId = parts[1];
+        const stars = parts[2];
+
+        // Save to DB (Assuming Review model)
+        const Review = require("./models/Review");
+        await Review.create({
+            reviewerId: ctx.from.id,
+            targetId: driverId,
+            rideRequestId: reqId,
+            role: 'passenger',
+            rating: stars
+        });
+
+        await ctx.editMessageText(`✅ Rahmat! Siz ${stars} yulduz qo'ydingiz.`);
+        await ctx.answerCallbackQuery("Baholandi!");
+        return;
+    }
+
     await next();
 });
 
@@ -856,7 +1009,7 @@ async function sendRadarPage(ctx, page) {
         const itemNum = skip + i + 1;
         const typeIcon = req.type === 'parcel' ? "📦 POST" : "🚖 TAXI";
         const details = req.type === 'parcel' ? `📦 ${req.packageType}` : `💺 ${req.seats} kishi${req.seatType === 'front' ? " (⚠️ OLDI O'RINDIQ)" : ""}`;
-        const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' });
+        const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
 
         let msg = `KLIENT #${itemNum}\n` +
             `${typeIcon} 📍 <b>${req.from.toUpperCase()} ➡️ ${req.to.toUpperCase()}</b>\n` +
@@ -905,9 +1058,233 @@ bot.callbackQuery(/radar_p_(\d+)/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-bot.hears("🔴 Dam olyapman", async (ctx) => {
-    await User.updateOne({ telegramId: ctx.from.id }, { isOnline: false, activeRoute: 'none' });
-    await ctx.reply("Siz dam olish rejimidasiz. Buyurtmalar kelmaydi.");
+bot.hears([
+    t('rest_mode', 'uz_latin'), t('rest_mode', 'uz_cyrillic')
+], async (ctx) => {
+    let user = await User.findOne({ telegramId: ctx.from.id });
+    if (user) {
+        user.isOnline = false;
+        user.activeRoute = 'none';
+        await user.save();
+
+        const lang = user.language || 'uz_cyrillic';
+        // Regenerate menu to show 'Ishdaman' button
+        await ctx.reply(t('rest_mode', lang) + "...", { reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false) });
+    }
+});
+
+bot.hears([
+    t('work_mode', 'uz_latin'), t('work_mode', 'uz_cyrillic')
+], async (ctx) => {
+    await ctx.reply("Qaysi yo'nalishda harakatlanmoqchisiz?", {
+        reply_markup: keyboards.routeSelection
+    });
+});
+
+bot.hears([
+    t('finish_route', 'uz_latin'), t('finish_route', 'uz_cyrillic')
+], async (ctx) => {
+    let user = await User.findOne({ telegramId: ctx.from.id });
+    if (user) {
+        user.activeRoute = 'none';
+        user.isOnline = false;
+        await user.save();
+        const lang = user.language || 'uz_cyrillic';
+        await ctx.reply("🏁", { reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false) });
+    }
+});
+
+
+// OCHIQ BUYURTMALAR (RADAR)
+bot.hears([
+    t('active_orders', 'uz_latin'), t('active_orders', 'uz_cyrillic')
+], async (ctx) => {
+    // Check if driver is active
+    const user = await User.findOne({ telegramId: ctx.from.id });
+    if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
+
+    // If driver is NOT online or has NO route
+    if (user.activeRoute === 'none') {
+        const lang = user.language || 'uz_cyrillic';
+        return ctx.reply("⚠️ Siz hali yo'nalish tanlamadingiz. Iltimos 'Ishdaman' tugmasini bosing.", {
+            reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false)
+        });
+    }
+
+    const routeMap = { 'tash_nam': { from: 'Tashkent', to: 'Namangan' }, 'nam_tash': { from: 'Namangan', to: 'Tashkent' } };
+    const route = routeMap[user.activeRoute];
+
+    if (!route) return ctx.reply("Xatolik: Yo'nalish aniqlanmadi.");
+
+    // Find Active Requests
+    const requests = await RideRequest.find({
+        status: 'searching', // Only open requests
+        from: route.from,
+        to: route.to,
+        // Optional: filter by date to avoid stale?
+    }).sort({ createdAt: -1 }).limit(10); // Show last 10
+
+    if (requests.length === 0) {
+        return ctx.reply("Hozircha bu yo'nalishda faol buyurtmalar yo'q.");
+    }
+
+    await ctx.reply(`📡 <b>Ochiq Buyurtmalar (${requests.length}):</b>`, { parse_mode: "HTML" });
+
+    for (const req of requests) {
+        let msg = `⏰ <b>${req.time}</b>\n📍 ${req.district ? req.district : 'Manzil'}\n`;
+        if (req.type === 'parcel') msg += `📦 <b>Pochta:</b> ${req.packageType}`;
+        else msg += `💺 <b>Joy:</b> ${req.seats}`;
+
+        const kb = new InlineKeyboard().text("🙋‍♂️ Taklif berish", `bid_${req._id}`);
+        await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
+    }
+});
+
+bot.hears([
+    t('my_passengers', 'uz_latin'), t('my_passengers', 'uz_cyrillic')
+], async (ctx) => {
+    // Find requests where this driver is assigned and status is 'matched'
+    // We need to find requests where offers array has an element with driverId = ctx.from.id (telegramId? No, user._id usually?)
+    // Let's check how we save driverId in offer.
+    // In driverBid.js: driverId: ctx.from.id (Telegram ID).
+    // In bot.js (accept_): offer.driverId
+
+    // So we query:
+    const activeRequests = await RideRequest.find({
+        "offers": {
+            $elemMatch: {
+                driverId: ctx.from.id,
+                status: 'accepted'
+            }
+        },
+        status: 'matched'
+    });
+
+    if (activeRequests.length === 0) {
+        return ctx.reply("Sizda hozircha faol buyurtmalar (yo'lovchilar) yo'q.");
+    }
+
+    await ctx.reply(`📡 <b>Sizning faol buyurtmalaringiz (${activeRequests.length}):</b>`, { parse_mode: "HTML" });
+
+    for (const req of activeRequests) {
+        const passenger = await User.findOne({ telegramId: req.passengerId });
+        const passName = passenger ? passenger.name : "Noma'lum";
+        const passPhone = passenger ? (passenger.phone || "N/A") : "N/A";
+
+        let msg = `👤 <b>Yo'lovchi:</b> ${passName}\n📞 <b>Tel:</b> ${passPhone}\n📍 ${req.from} ➡️ ${req.to}\n`;
+        if (req.type === 'parcel') msg += `📦 <b>Pochta:</b> ${req.packageType}`;
+        else msg += `💺 <b>Joy:</b> ${req.seats} kishi`;
+
+        // Actions: Complete, Contact
+        const kb = new InlineKeyboard()
+            .text("✅ Yakunlash (Yetib bordik)", `complete_ride_${req._id}`).row();
+
+        if (passenger && passenger.username) kb.url("Telegram", `https://t.me/${passenger.username}`);
+
+        await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
+    }
+});
+
+// Complete Ride Handler
+bot.callbackQuery(/^complete_ride_(.+)$/, async (ctx) => {
+    const requestId = ctx.match[1];
+    const request = await RideRequest.findById(requestId);
+
+    if (!request) return ctx.answerCallbackQuery("Buyurtma topilmadi.");
+
+    if (request.status !== 'matched') {
+        return ctx.answerCallbackQuery("Buyurtma allaqachon yakunlangan yoki bekor qilingan.");
+    }
+
+    request.status = 'completed';
+    await request.save();
+
+    await ctx.answerCallbackQuery("Buyurtma yakunlandi!");
+    await ctx.editMessageText(`✅ <b>Buyurtma yakunlandi!</b>\n\n${request.from} ➡️ ${request.to}`, { parse_mode: "HTML" });
+
+    // Notify Passenger
+    try {
+        const kb = new InlineKeyboard();
+        [1, 2, 3, 4, 5].forEach(star => {
+            kb.text(star + " ⭐️", `rate_save_${ctx.from.id}_${requestId}_${star}`);
+        });
+
+        await ctx.api.sendMessage(request.passengerId, `🏁 <b>Siz manzilga yetib keldingiz!</b>\n\nHaydovchi safarni yakunladi. Iltimos, xizmat sifatini baholang:`, {
+            parse_mode: "HTML",
+            reply_markup: kb
+        });
+    } catch (e) {
+        console.error("Failed to notify passenger of completion:", e);
+    }
+});
+
+// Complete All Handler
+bot.hears([
+    t('complete_all', 'uz_latin'), t('complete_all', 'uz_cyrillic')
+], async (ctx) => {
+    const user = await User.findOne({ telegramId: ctx.from.id });
+    if (!user || user.role !== 'driver') return ctx.reply("Siz haydovchi emassiz.");
+
+    const lang = user.language || 'uz_cyrillic';
+
+    // Find all active requests for this driver
+    const activeRequests = await RideRequest.find({
+        "offers": {
+            $elemMatch: {
+                driverId: ctx.from.id,
+                status: 'accepted'
+            }
+        },
+        status: 'matched'
+    });
+
+    if (activeRequests.length === 0) {
+        // Even if no passengers, ask if they want to start working on new route
+        await ctx.reply("Sizda hozircha faol yo'lovchilar yo'q.\n\n🔄 Yangi yo'nalishda ishlashni boshlaysizmi?", {
+            reply_markup: keyboards.routeSelection
+        });
+        return;
+    }
+
+    // Complete all requests
+    for (const req of activeRequests) {
+        req.status = 'completed';
+        await req.save();
+
+        // Notify Passenger
+        try {
+            const kb = new InlineKeyboard();
+            [1, 2, 3, 4, 5].forEach(star => {
+                kb.text(star + " ⭐️", `rate_save_${ctx.from.id}_${req._id}_${star}`);
+            });
+
+            await ctx.api.sendMessage(req.passengerId, `🏁 <b>Siz manzilga yetib keldingiz!</b>\n\nHaydovchi safarni yakunladi. Iltimos, xizmat sifatini baholang:`, {
+                parse_mode: "HTML",
+                reply_markup: kb
+            });
+        } catch (e) {
+            console.error("Failed to notify passenger:", e);
+        }
+    }
+
+    await ctx.reply(`✅ <b>Barcha buyurtmalar yakunlandi!</b>\n\nJami: ${activeRequests.length} ta yo'lovchi/pochta.\n\n🔄 Yangi yo'nalishda ishlashni boshlaysizmi?`, {
+        parse_mode: "HTML",
+        reply_markup: keyboards.routeSelection
+    });
+});
+
+bot.hears([
+    t('finish_route', 'uz_latin'), t('finish_route', 'uz_cyrillic')
+], async (ctx) => {
+    let user = await User.findOne({ telegramId: ctx.from.id });
+    if (user) {
+        user.activeRoute = 'none'; // Clear route but maybe keep online? Or go offline?
+        user.isOnline = false; // Usually finish means stop working
+        await user.save();
+
+        const lang = user.language || 'uz_cyrillic';
+        await ctx.reply("🏁", { reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false) });
+    }
 });
 
 // Driver Route Selection Handler (Outside of conversation)
@@ -925,7 +1302,12 @@ bot.on("callback_query:data", async (ctx, next) => {
 
             const routeName = route === 'tash_nam' ? "Tashkent ➡️ Namangan" : "Namangan ➡️ Tashkent";
             await ctx.deleteMessage(); // Remove buttons
-            await ctx.reply(`✅ Siz faol holatdasiz!\nYo'nalish: ${routeName}\n\nBuyurtmalar kelishini kuting.`);
+
+            const lang = user.language || 'uz_cyrillic';
+
+            await ctx.reply(`✅ Siz faol holatdasiz!\nYo'nalish: ${routeName}\n\nBuyurtmalar kelishini kuting.`, {
+                reply_markup: dynamicKeyboards.getDriverMenu(lang, true, true)
+            });
             await ctx.answerCallbackQuery();
             return;
         }
@@ -933,7 +1315,9 @@ bot.on("callback_query:data", async (ctx, next) => {
     await next();
 });
 
-bot.hears("⚙️ Sozlamalar", async (ctx) => {
+bot.hears([
+    t('settings', 'uz_latin'), t('settings', 'uz_cyrillic')
+], async (ctx) => {
     // Check role
     const user = await User.findOne({ telegramId: ctx.from.id });
     if (user && user.role === 'driver') {
@@ -947,7 +1331,9 @@ bot.hears("⚙️ Sozlamalar", async (ctx) => {
 });
 
 // View Active Drivers
-bot.hears("👀 Bo'sh haydovchilar", async (ctx) => {
+bot.hears([
+    t('available_drivers', 'uz_latin'), t('available_drivers', 'uz_cyrillic')
+], async (ctx) => {
     const drivers = await User.find({
         role: 'driver',
         status: 'approved',
@@ -955,17 +1341,34 @@ bot.hears("👀 Bo'sh haydovchilar", async (ctx) => {
         // activeRoute: { $ne: 'none' } // Optional: only show those with active route
     }).limit(10);
 
+    // Calculate ratings for drivers (if we have Review model)
+    const Review = require("./models/Review");
+
     if (drivers.length === 0) {
         return ctx.reply("hozirda afsuski barcha haydovchilar band.");
     }
 
-    let msg = `<b>🟢 Aktiv Haydovchilar (${drivers.length}):</b>\n\n`;
-    drivers.forEach((d, i) => {
+    let msg = `<b>🟢 ${t('available_drivers', 'uz_cyrillic')} (${drivers.length}):</b>\n\n`;
+
+    for (let i = 0; i < drivers.length; i++) {
+        const d = drivers[i];
         const route = d.activeRoute === 'tash_nam' ? "Toshkent -> Namangan" :
-            d.activeRoute === 'nam_tash' ? "Namangan -> Toshkent" : "Yo'nalish tanlanmagan";
+            d.activeRoute === 'nam_tash' ? "Namangan -> Toshkent" : "---";
         const car = d.carDetails ? d.carDetails.model : d.carModel;
-        msg += `${i + 1}. <b>${d.name}</b>\n🚗 ${car}\n📍 ${route}\n\n`;
-    });
+        const capacity = d.carDetails ? d.carDetails.seats : '?';
+
+        // Calculate Avg Rating
+        const reviews = await Review.find({ targetId: d.telegramId }); // targetId is telegramId logic in bot.js L841 uses ctx.from.id which is telegramId
+        let avgRating = 0;
+        if (reviews.length > 0) {
+            const sum = reviews.reduce((a, b) => a + b.rating, 0);
+            avgRating = (sum / reviews.length).toFixed(1);
+        } else {
+            avgRating = "N/A";
+        }
+
+        msg += `${i + 1}. 🚗 <b>${car}</b> (${capacity} kishilik)\n⭐️ Reyting: ${avgRating}\n📍 ${route}\n\n`;
+    }
 
     await ctx.reply(msg, { parse_mode: "HTML" });
 });

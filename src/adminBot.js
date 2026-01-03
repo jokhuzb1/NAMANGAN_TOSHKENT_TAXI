@@ -312,6 +312,20 @@ adminBot.on("callback_query:data", async (ctx, next) => {
         if (driver.selfie && driver.selfie.telegramFileId && adminBot.mainBot) {
             await sendPhotoByUrl(driver.selfie.telegramFileId, "👤 Haydovchi Rasmi", true);
         }
+
+        if (driver.verificationDocuments && adminBot.mainBot) {
+            const docs = driver.verificationDocuments;
+            if (docs.licenseFront && docs.licenseFront.telegramFileId) {
+                await sendPhotoByUrl(docs.licenseFront.telegramFileId, "👮‍♂️ Prava (Oldi)");
+            }
+            if (docs.licenseBack && docs.licenseBack.telegramFileId) {
+                await sendPhotoByUrl(docs.licenseBack.telegramFileId, "👮‍♂️ Prava (Orqa)");
+            }
+            if (docs.passport && docs.passport.telegramFileId) {
+                await sendPhotoByUrl(docs.passport.telegramFileId, "🛂 Pasport");
+            }
+        }
+
         if (driver.carImages && driver.carImages.length > 0 && adminBot.mainBot) {
             for (let i = 0; i < driver.carImages.length; i++) {
                 await sendPhotoByUrl(driver.carImages[i].telegramFileId, `🚗 Mashina Rasmi #${i + 1}`);

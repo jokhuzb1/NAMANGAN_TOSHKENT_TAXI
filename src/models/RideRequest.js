@@ -19,6 +19,7 @@ const rideRequestSchema = new mongoose.Schema({
     packageType: { type: String }, // 'document', 'load', 'box', 'other'
     district: { type: String }, // e.g. "Yunusobod", "Parkent"
     voiceId: { type: String }, // Telegram Voice File ID
+    parcelImage: { type: String }, // Telegram Photo File ID
     status: { type: String, enum: ['searching', 'negotiating', 'matched', 'completed', 'cancelled'], default: 'searching' },
     offers: [offerSchema],
     blockedDrivers: [{

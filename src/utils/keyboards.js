@@ -129,8 +129,12 @@ const contactActions = (user) => {
     } else {
         kb.url("💬 Telegram profil", `tg://user?id=${user.telegramId}`);
     }
-    // Only show phone call button if we want to encourage offline calls, but url buttons don't support tel: well.
-    // The text message contains the phone number anyway.
+
+    // Add Call Button
+    if (user.phone) {
+        kb.text("📞 Bog'lanish", `show_contact_${user._id}`);
+    }
+
     return kb;
 };
 

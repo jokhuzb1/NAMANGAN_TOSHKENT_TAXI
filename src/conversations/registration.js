@@ -267,6 +267,51 @@ async function driverRegister(conversation, ctx) {
         });
     }
 
+    // Step 8: License Front
+    let licenseFront = data.licenseFront;
+    if (step < 8) {
+        await ctx.reply("👮‍♂️ <b>Guvohnoma (Prava) - Old tarafi</b>\n\nIltimos, haydovchilik guvohnomangizning old tarafini rasmga olib yuboring.", { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+        const imgCtx = await conversation.waitFor("message:photo");
+        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
+        licenseFront = { telegramFileId: photo.file_id };
+        data.licenseFront = licenseFront;
+
+        step = 8;
+        await conversation.external(async () => {
+            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 8, registrationData: data });
+        });
+    }
+
+    // Step 9: License Back
+    let licenseBack = data.licenseBack;
+    if (step < 9) {
+        await ctx.reply("👮‍♂️ <b>Guvohnoma (Prava) - Orqa tarafi</b>\n\nIltimos, haydovchilik guvohnomangizning orqa tarafini rasmga olib yuboring.", { parse_mode: "HTML" });
+        const imgCtx = await conversation.waitFor("message:photo");
+        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
+        licenseBack = { telegramFileId: photo.file_id };
+        data.licenseBack = licenseBack;
+
+        step = 9;
+        await conversation.external(async () => {
+            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 9, registrationData: data });
+        });
+    }
+
+    // Step 10: Passport
+    let passport = data.passport;
+    if (step < 10) {
+        await ctx.reply("🛂 <b>Pasport Rasmi</b>\n\nIltimos, pasportingizning asosiy sahifasini (rasm bor joyi) aniq qilib yuboring.", { parse_mode: "HTML" });
+        const imgCtx = await conversation.waitFor("message:photo");
+        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
+        passport = { telegramFileId: photo.file_id };
+        data.passport = passport;
+
+        step = 10;
+        await conversation.external(async () => {
+            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 10, registrationData: data });
+        });
+    }
+
     // Finalize
     await conversation.external(async () => {
         const u = await User.findOne({ telegramId: ctx.from.id });
@@ -290,6 +335,12 @@ async function driverRegister(conversation, ctx) {
             // Fix Date objects if they became strings during JSON serialization/deserialization by chance
             // (Though structuredClone handles Date usually)
             u.carImages = data.carImages;
+
+            u.verificationDocuments = {
+                licenseFront: data.licenseFront,
+                licenseBack: data.licenseBack,
+                passport: data.passport
+            };
 
             u.status = 'pending_verification';
             u.registrationStep = 0;

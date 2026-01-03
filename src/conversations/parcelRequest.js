@@ -7,7 +7,7 @@ async function parcelRequestConversation(conversation, ctx) {
     let step = 1;
     const state = {};
 
-    while (step <= 5) {
+    while (step <= 6) {
         // Common Handler for Cancel
         const handleCommonActions = async (text) => {
             if (text === "❌ Bekor qilish") {
@@ -105,10 +105,43 @@ async function parcelRequestConversation(conversation, ctx) {
                 step = 5;
             }
         }
-        // Step 5: Confirm
+        // Step 5: Image Upload (Optional or Required? Prompt says "Pochtani topshirishdan oldin rasmga olib botga yuklash (bu xavfsizlik va ishonch uchun juda muhim)". Lets make it optional but recommended)
         else if (step === 5) {
+            const kb = new Keyboard()
+                .text("➡️ O'tkazib yuborish").text("⬅️ Orqaga").text("❌ Bekor qilish")
+                .resized();
+
+            await ctx.reply(`📸 <b>Pochta rasmini yuklang</b> (Ixtiyoriy)\n\nBu haydovchiga yukni tushunishga va ishonchni oshirishga yordam beradi.`, {
+                parse_mode: "HTML",
+                reply_markup: kb
+            });
+
+            const response = await conversation.waitFor(["message:photo", "message:text"]);
+
+            if (response.message.photo) {
+                // Get highest resolution
+                const photo = response.message.photo[response.message.photo.length - 1];
+                state.parcelImage = photo.file_id;
+                step = 6;
+            } else if (response.message.text) {
+                const text = response.message.text;
+                const action = await handleCommonActions(text);
+                if (action === "CANCEL") return;
+                if (action === "BACK") { step = 4; continue; }
+
+                if (text === "➡️ O'tkazib yuborish") {
+                    state.parcelImage = null;
+                    step = 6;
+                } else {
+                    await ctx.reply("Iltimos, rasm yuklang yoki 'O'tkazib yuborish'ni bosing.");
+                }
+            }
+        }
+        // Step 6: Confirm
+        else if (step === 6) {
             let details = state.district;
             if (state.voiceId) details += " (🔊)";
+            if (state.parcelImage) details += " (📸 Rasm bor)";
 
             const summary = `
 📦 <b>Pochta Ma'lumotlari:</b>
@@ -125,7 +158,7 @@ async function parcelRequestConversation(conversation, ctx) {
             const action = await handleCommonActions(text);
 
             if (action === "CANCEL") return;
-            if (action === "BACK") { step = 4; continue; }
+            if (action === "BACK") { step = 5; continue; }
 
             if (text === "✅ Tasdiqlash") {
                 break;
@@ -146,6 +179,7 @@ async function parcelRequestConversation(conversation, ctx) {
             packageType: state.packageType,
             district: state.district,
             voiceId: state.voiceId,
+            parcelImage: state.parcelImage,
             status: 'searching'
         });
         savedRequest = await request.save();

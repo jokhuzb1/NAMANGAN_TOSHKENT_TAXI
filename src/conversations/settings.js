@@ -1,15 +1,22 @@
 const { InlineKeyboard } = require("grammy");
 const User = require("../models/User");
 const keyboardsUtils = require("../utils/keyboards");
+const dynamicKeyboards = require("../utils/keyboardsDynamic");
+const { t } = require("../utils/i18n_fixed");
 
 async function driverSettings(conversation, ctx) {
     // Helper to show main menu
+    // Helper to show main menu
     const showMainMenu = async (ctx) => {
-        await ctx.reply("⚙️ <b>Sozlamalar</b>\n\nNiman o'zgartirmoqchisiz?", {
+        const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }));
+        const lang = user.language || 'uz_cyrillic';
+
+        await ctx.reply("⚙️ <b>" + t('settings', lang) + "</b>", {
             reply_markup: new InlineKeyboard()
-                .text("📸 Mashina Rasmlari", "settings_car_photos").row()
-                .text("📝 Ma'lumotlarni Tahrirlash", "settings_edit_profile").row()
-                .text("❌ Yopish", "settings_close"),
+                .text("📸 " + (lang === 'uz_latin' ? "Mashina Rasmlari" : "Машина Расмлари"), "settings_car_photos").row()
+                .text("📝 " + (lang === 'uz_latin' ? "Ma'lumotlarni Tahrirlash" : "Маълумотларни Таҳрирлаш"), "settings_edit_profile").row()
+                .text("🌐 " + (lang === 'uz_latin' ? "Tilni o'zgartirish" : "Тилни ўзгартириш"), "settings_language").row()
+                .text("❌ " + t('cancel', lang), "settings_close"),
             parse_mode: "HTML"
         });
     };
@@ -38,17 +45,27 @@ async function driverSettings(conversation, ctx) {
             await manageProfile(conversation, submenuCtx);
             await showMainMenu(ctx);
         }
+
+        if (data === "settings_language") {
+            await submenuCtx.answerCallbackQuery();
+            await manageLanguage(conversation, submenuCtx);
+            await showMainMenu(ctx);
+        }
     }
 }
 
 const { driverRegister } = require("./registration");
 
 async function passengerSettings(conversation, ctx) {
-    // Show simple menu for passenger
-    await ctx.reply("⚙️ <b>Sozlamalar (Yo'lovchi)</b>", {
+    // Passenger Settings
+    const user = await conversation.external(() => User.findOne({ telegramId: ctx.from.id }));
+    const lang = user.language || 'uz_cyrillic';
+
+    await ctx.reply("⚙️ <b>" + t('settings', lang) + "</b>", {
         reply_markup: new InlineKeyboard()
-            .text("🚕 Haydovchi bo'lish", "switch_to_driver").row()
-            .text("❌ Yopish", "settings_close"),
+            .text("🚕 " + (lang === 'uz_latin' ? "Haydovchi bo'lish" : "Ҳайдовчи бўлиш"), "switch_to_driver").row()
+            .text("🌐 " + (lang === 'uz_latin' ? "Tilni o'zgartirish" : "Тилни ўзгартириш"), "settings_language").row()
+            .text("❌ " + t('cancel', lang), "settings_close"),
         parse_mode: "HTML"
     });
 
@@ -69,6 +86,54 @@ async function passengerSettings(conversation, ctx) {
         // We need to import it first
         await driverRegister(conversation, submenuCtx);
     }
+
+    if (data === "settings_language") {
+        await submenuCtx.answerCallbackQuery();
+        await manageLanguage(conversation, submenuCtx);
+    }
+}
+
+async function manageLanguage(conversation, ctx) {
+    await ctx.reply("🌐 Tilni tanlang:", {
+        reply_markup: new InlineKeyboard()
+            .text("🇺🇿 O'zbekcha (Lotin)", "lang_uz_latin").row()
+            .text("🇺🇿 Ўзбекча (Кирилл)", "lang_uz_cyrillic").row()
+            .text("🔙 Orqaga", "back_lang")
+    });
+
+    const response = await conversation.waitFor("callback_query:data");
+    const data = response.callbackQuery.data;
+
+    if (data === "back_lang") {
+        await response.answerCallbackQuery();
+        await response.deleteMessage();
+        return;
+    }
+
+    let lang = 'uz_latin';
+    if (data === "lang_uz_cyrillic") lang = 'uz_cyrillic';
+
+    await conversation.external(async () => {
+        await User.updateOne({ telegramId: ctx.from.id }, { language: lang });
+    });
+
+    await response.answerCallbackQuery("✅");
+    await response.deleteMessage();
+
+    const userForKb = await conversation.external(async () => {
+        return await User.findOne({ telegramId: ctx.from.id });
+    });
+
+    let kb;
+    if (userForKb.role === 'passenger') {
+        kb = dynamicKeyboards.getPassengerMenu(lang);
+    } else if (userForKb.role === 'driver') {
+        kb = dynamicKeyboards.getDriverMenu(lang, userForKb.isOnline, userForKb.activeRoute !== 'none');
+    } else {
+        kb = dynamicKeyboards.getRoleSelection(lang);
+    }
+
+    await ctx.reply(t('welcome', lang), { reply_markup: kb });
 }
 
 async function manageProfile(conversation, ctx) {
