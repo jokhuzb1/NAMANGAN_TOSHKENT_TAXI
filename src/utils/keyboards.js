@@ -106,7 +106,7 @@ const driverBid = (requestId) => new InlineKeyboard()
 
 // Driver: Take Admin Request (Direct Contact)
 const adminOrderTake = (requestId) => new InlineKeyboard()
-    .text("📞 Raqamni olish (5 ta qoldi)", `take_admin_${requestId}`);
+    .text("📞 Рақамни олиш", `take_admin_${requestId}`);
 
 
 // Passenger: Accept/Decline Offer

@@ -1191,7 +1191,7 @@ async function sendRadarPage(ctx, page) {
 
         const cardKeyboard = new InlineKeyboard();
         if (req.createdBy === 'admin') {
-            cardKeyboard.text("📞 Raqamni olish (Tezkor)", `take_admin_${req._id}`);
+            cardKeyboard.text("📞 Рақамни олиш", `take_admin_${req._id}`);
         } else {
             cardKeyboard.text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
         }
@@ -1310,7 +1310,14 @@ bot.hears([
         if (req.type === 'parcel') msg += `📦 <b>Почта:</b> ${req.packageType}`;
         else msg += `💺 <b>Жой:</b> ${req.seats}`;
 
-        const kb = new InlineKeyboard().text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
+        // Check if admin order - show different button
+        let kb;
+        if (req.createdBy === 'admin') {
+            msg += `\n\n<i>(Тезкор буюртма - рақамни олинг)</i>`;
+            kb = new InlineKeyboard().text("📞 Рақамни олиш", `take_admin_${req._id}`);
+        } else {
+            kb = new InlineKeyboard().text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
+        }
         await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
     }
 });
