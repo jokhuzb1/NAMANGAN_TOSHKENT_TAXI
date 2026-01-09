@@ -48,11 +48,20 @@ bot.use(limit({
         try {
             if (ctx.callbackQuery) {
                 // Always answer callback queries to prevent loading state
-                await ctx.answerCallbackQuery({ text: "⚠️ Илтимос, секинроқ босинг!", show_alert: true });
+                await ctx.answerCallbackQuery({
+                    text: "🚫 СПАМ ОГОҲЛАНТИРИШИ!\n\nСиз жуда кўп тугма боcдингиз. Илтимос, 5 сония кутинг.",
+                    show_alert: true
+                });
             } else if (now - lastWarning > WARNING_COOLDOWN) {
                 // For messages, only warn once per cooldown period
                 rateLimitWarnings.set(userId, now);
-                await ctx.reply("⚠️ Илтимос, секинроқ босинг! Бот ишлаяпти, бироз кутинг.");
+                await ctx.reply(
+                    "🚫 <b>СПАМ ОГОҲЛАНТИРИШИ!</b>\n\n" +
+                    "Сиз жуда кўп тугма босгансиз ва спам фильтрини фаоллаштирдингиз.\n\n" +
+                    "⏳ Илтимос, <b>5 сония</b> кутинг ва қайта уриниб кўринг.\n\n" +
+                    "<i>Эслатма: Тугмаларни секин босинг, бот ишлаяпти!</i>",
+                    { parse_mode: "HTML" }
+                );
             }
         } catch (e) { } // Ignore errors if user blocked etc
     },
