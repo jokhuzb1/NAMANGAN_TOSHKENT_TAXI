@@ -1,4 +1,4 @@
-const { t } = require('./i18n_fixed');
+const { t } = require('./i18n');
 const { Keyboard } = require('grammy');
 
 function getRoleSelection(lang) {
@@ -20,18 +20,26 @@ function getPassengerMenu(lang) {
         .resized();
 }
 
-function getDriverMenu(lang, isOnline = false, hasActiveRide = false) {
+function getDriverMenu(lang, isOnline = false, hasActiveRide = false, activeOrdersCount = 0) {
     const kb = new Keyboard();
 
+    // If driver has active orders (accepted passengers), show passenger management
+    if (activeOrdersCount > 0) {
+        kb.text(`👥 Йўловчилар (${activeOrdersCount})`).text("✅ Ҳаммасини якунлаш");
+        kb.row();
+        kb.text("📋 Радар");
+        kb.row();
+        kb.text("⚙️ Созламалар");
+        kb.resized();
+        return kb;
+    }
+
+    // Normal menu - no active orders
     // Top row: Work status toggle
-    if (hasActiveRide) {
-        kb.text(t('finish_route', lang));
+    if (isOnline) {
+        kb.text(t('rest_mode', lang));
     } else {
-        if (isOnline) {
-            kb.text(t('rest_mode', lang));
-        } else {
-            kb.text(t('work_mode', lang));
-        }
+        kb.text(t('work_mode', lang));
     }
 
     // Second row: Radar and My Passengers (always visible)

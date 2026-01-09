@@ -2,7 +2,13 @@ const { InlineKeyboard } = require("grammy");
 const User = require("../models/User");
 const keyboardsUtils = require("../utils/keyboards");
 const dynamicKeyboards = require("../utils/keyboardsDynamic");
-const { t } = require("../utils/i18n_fixed");
+const { t } = require("../utils/i18n");
+
+function isGlobalCommand(text) {
+    if (!text) return false;
+    const globalPrefixes = ['/', '🚖', '🚕', '📦', '👀', '⚙️', '🟢', '🔴', '📡', '🏁', '✅', '👤', '🔙'];
+    return globalPrefixes.some(p => text.startsWith(p));
+}
 
 async function driverSettings(conversation, ctx) {
     // Helper to show main menu
@@ -156,6 +162,7 @@ async function manageProfile(conversation, ctx) {
         await ctx.reply(infoMsg, {
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard()
+                .text("📸 Расмимни янгилаш", "edit_profile_selfie").row()
                 .text("👤 Исм", "edit_profile_name")
                 .text("📞 Телефон", "edit_profile_phone").row()
                 .text("🚗 Модел", "edit_profile_model")
@@ -175,49 +182,104 @@ async function manageProfile(conversation, ctx) {
 
         if (action === "edit_profile_name") {
             await ctx.reply("✏️ Янги исмингизни ёзинг:");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                // Cancelled
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { name: message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { name: response.message.text });
             });
             await ctx.reply("✅ Исм янгиланди!");
 
         } else if (action === "edit_profile_carnumber") {
             await ctx.reply("✏️ Янги машина рақамини ёзинг (масалан: 01 A 000 AA):");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { carNumber: message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { carNumber: response.message.text });
             });
             await ctx.reply("✅ Машина рақами янгиланди!");
 
         } else if (action === "edit_profile_phone") {
             await ctx.reply("📞 Янги телефон рақамини ёзинг:");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { phone: message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { phone: response.message.text });
             });
             await ctx.reply("✅ Телефон рақами янгиланди!");
 
         } else if (action === "edit_profile_model") {
             await ctx.reply("🚗 Янги машина моделини ёзинг (масалан: Gentra):");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.model": message.text, "carModel": message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.model": response.message.text, "carModel": response.message.text });
             });
             await ctx.reply("✅ Машина модели янгиланди!");
 
         } else if (action === "edit_profile_color") {
             await ctx.reply("🎨 Янги машина рангини ёзинг (масалан: Оқ):");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.color": message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.color": response.message.text });
             });
             await ctx.reply("✅ Машина ранги янгиланди!");
 
+        } else if (action === "edit_profile_selfie") {
+            await ctx.reply("📸 Янги расмни юборинг (Селфи):");
+            const response = await conversation.waitFor(["message:photo", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && response.message.text && response.message.text.startsWith('/'))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
+            if (!response.message || !response.message.photo) {
+                await ctx.reply("⚠️ Илтимос, расм юборинг.");
+                continue;
+            }
+            const newPhoto = response.message.photo[response.message.photo.length - 1];
+            await conversation.external(async () => {
+                await User.updateOne({ telegramId: ctx.from.id }, {
+                    selfie: {
+                        telegramFileId: newPhoto.file_id,
+                        telegramFileUniqueId: newPhoto.file_unique_id,
+                        uploadedAt: new Date()
+                    }
+                });
+            });
+            await ctx.reply("✅ Расм янгиланди!");
+
         } else if (action === "edit_profile_year") {
             await ctx.reply("📅 Машина йилини ёзинг (масалан: 2023):");
-            const { message } = await conversation.waitFor("message:text");
+            const response = await conversation.waitFor(["message:text", "callback_query:data"]);
+            if (response.callbackQuery || (response.message && isGlobalCommand(response.message.text))) {
+                if (response.callbackQuery) await response.answerCallbackQuery();
+                await ctx.reply("❌ Амал бекор қилинди.");
+                continue;
+            }
             await conversation.external(async () => {
-                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.year": message.text });
+                await User.updateOne({ telegramId: ctx.from.id }, { "carDetails.year": response.message.text });
             });
             await ctx.reply("✅ Машина йили янгиланди!");
         }
@@ -276,7 +338,18 @@ async function manageCarPhotos(conversation, ctx) {
 
             if (action === "add_photo") {
                 await ctx.reply("📸 Янги расмни юборинг (фақат расм):");
-                const photoCtx = await conversation.waitFor("message:photo");
+                const photoCtx = await conversation.waitFor(["message:photo", "callback_query:data", "message:text"]);
+
+                if (photoCtx.callbackQuery || (photoCtx.message && photoCtx.message.text && isGlobalCommand(photoCtx.message.text))) {
+                    if (photoCtx.callbackQuery) await photoCtx.answerCallbackQuery();
+                    await ctx.reply("❌ Амал бекор қилинди.");
+                    continue;
+                }
+
+                if (!photoCtx.message || !photoCtx.message.photo) {
+                    await ctx.reply("⚠️ Илтимос, фақат расм юборинг.");
+                    continue;
+                }
                 const newPhoto = photoCtx.message.photo[photoCtx.message.photo.length - 1];
 
                 // Save

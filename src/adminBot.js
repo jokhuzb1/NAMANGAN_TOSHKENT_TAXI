@@ -2,6 +2,7 @@
 const { Bot, session, InlineKeyboard, Keyboard, InputFile } = require("grammy");
 const { conversations, createConversation } = require("@grammyjs/conversations");
 const { addAdminConversation, adminCreateOrderConversation } = require("./conversations/adminOperations");
+const dynamicKeyboards = require("./utils/keyboardsDynamic");
 const config = require("./config");
 const User = require("./models/User");
 const Admin = require("./models/Admin");
@@ -18,6 +19,17 @@ adminBot.use(session({ initial: () => ({}) }));
 adminBot.use(conversations());
 adminBot.use(createConversation(addAdminConversation));
 adminBot.use(createConversation(adminCreateOrderConversation));
+
+// Global Error Handler - Prevent crash on expired callbacks etc.
+adminBot.catch((err) => {
+    const ctx = err.ctx;
+    console.error(`[ADMIN BOT ERROR] Error while handling update ${ctx.update.update_id}:`);
+    console.error(err.error.message || err.error);
+    // Try to gracefully respond if possible
+    if (ctx.callbackQuery) {
+        ctx.answerCallbackQuery("⚠️ Хатолик юз берди.").catch(() => { });
+    }
+});
 
 // Auth Middleware: Check if user is Admin
 adminBot.use(async (ctx, next) => {
@@ -252,7 +264,11 @@ adminBot.on("callback_query:data", async (ctx, next) => {
 
         try {
             if (adminBot.mainBot) {
-                await adminBot.mainBot.api.sendMessage(user.telegramId, "✅ Tabriklaymiz! Sizning akkauntingiz tasdiqlandi. Endi buyurtmalarni qabul qilishingiz mumkin.");
+                const lang = user.language || 'uz_cyrillic';
+                const menu = dynamicKeyboards.getDriverMenu(lang, user.isOnline, false, 0);
+                await adminBot.mainBot.api.sendMessage(user.telegramId, "✅ Tabriklaymiz! Sizning akkauntingiz tasdiqlandi. Endi buyurtmalarni qabul qilishingiz mumkin.", {
+                    reply_markup: menu
+                });
             }
         } catch (e) {
             console.error("Failed to notify driver:", e.message);
@@ -399,7 +415,7 @@ adminBot.on("callback_query:data", async (ctx, next) => {
                 await sendPhotoByUrl(driver.carImages[i].telegramFileId, `🚗 Mashina Rasmi #${i + 1}`);
             }
         }
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 

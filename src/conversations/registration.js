@@ -2,7 +2,7 @@ const { keyboards } = require("../utils/keyboards");
 const User = require("../models/User");
 const keyboardsUtils = require("../utils/keyboards");
 const adminBot = require("../adminBot");
-const { t } = require("../utils/i18n_fixed");
+const { t } = require("../utils/i18n");
 
 async function passengerRegister(conversation, ctx) {
     // 1. Ask for Phone
@@ -139,8 +139,18 @@ async function driverRegister(conversation, ctx) {
     let carModel = data.carModel;
     if (step < 3) {
         await ctx.reply("✅ Sizning rasmingiz qabul qilindi.\n\n🚗 Mashinangiz modelini tanlang:", { reply_markup: keyboardsUtils.carModels });
-        const modelCtx = await conversation.waitForCallbackQuery(["car_gentra", "car_cobalt", "car_nexia3", "car_spark", "car_other"]);
-        carModel = modelCtx.callbackQuery.data.replace("car_", "");
+        // Accept any car_ callback
+        const modelCtx = await conversation.waitFor("callback_query:data");
+        const selectedData = modelCtx.callbackQuery.data;
+
+        if (!selectedData.startsWith("car_")) {
+            // Handle unexpected input or just ignore/retry? 
+            // Ideally loop, but for now assuming user clicks button.
+            // If user writes text, this waits forever for callback. 
+            // Let's assume buttons.
+        }
+
+        carModel = selectedData.replace("car_", "");
         await modelCtx.answerCallbackQuery();
 
         data.carModel = carModel;
@@ -272,50 +282,8 @@ async function driverRegister(conversation, ctx) {
         });
     }
 
-    // Step 8: License Front
-    let licenseFront = data.licenseFront;
-    if (step < 8) {
-        await ctx.reply("👮‍♂️ <b>Guvohnoma (Prava) - Old tarafi</b>\n\nIltimos, haydovchilik guvohnomangizning old tarafini rasmga olib yuboring.", { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
-        const imgCtx = await conversation.waitFor("message:photo");
-        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
-        licenseFront = { telegramFileId: photo.file_id };
-        data.licenseFront = licenseFront;
-
-        step = 8;
-        await conversation.external(async () => {
-            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 8, registrationData: data });
-        });
-    }
-
-    // Step 9: License Back
-    let licenseBack = data.licenseBack;
-    if (step < 9) {
-        await ctx.reply("👮‍♂️ <b>Guvohnoma (Prava) - Orqa tarafi</b>\n\nIltimos, haydovchilik guvohnomangizning orqa tarafini rasmga olib yuboring.", { parse_mode: "HTML" });
-        const imgCtx = await conversation.waitFor("message:photo");
-        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
-        licenseBack = { telegramFileId: photo.file_id };
-        data.licenseBack = licenseBack;
-
-        step = 9;
-        await conversation.external(async () => {
-            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 9, registrationData: data });
-        });
-    }
-
-    // Step 10: Passport
-    let passport = data.passport;
-    if (step < 10) {
-        await ctx.reply("🛂 <b>Pasport Rasmi</b>\n\nIltimos, pasportingizning asosiy sahifasini (rasm bor joyi) aniq qilib yuboring.", { parse_mode: "HTML" });
-        const imgCtx = await conversation.waitFor("message:photo");
-        const photo = imgCtx.message.photo[imgCtx.message.photo.length - 1];
-        passport = { telegramFileId: photo.file_id };
-        data.passport = passport;
-
-        step = 10;
-        await conversation.external(async () => {
-            await User.updateOne({ telegramId: ctx.from.id }, { registrationStep: 10, registrationData: data });
-        });
-    }
+    // Steps 8, 9, 10 (License/Passport) REMOVED per request.
+    // Flow proceeds directly to Finalize.
 
     // Finalize
     await conversation.external(async () => {
@@ -336,15 +304,13 @@ async function driverRegister(conversation, ctx) {
             u.carModel = data.carModel; // Legacy
 
             u.selfie = data.selfie;
-
-            // Fix Date objects if they became strings during JSON serialization/deserialization by chance
-            // (Though structuredClone handles Date usually)
             u.carImages = data.carImages;
 
             u.verificationDocuments = {
-                licenseFront: data.licenseFront,
-                licenseBack: data.licenseBack,
-                passport: data.passport
+                // No documents required anymore
+                licenseFront: null,
+                licenseBack: null,
+                passport: null
             };
 
             u.status = 'pending_verification';

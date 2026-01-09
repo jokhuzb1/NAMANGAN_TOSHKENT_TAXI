@@ -1,8 +1,22 @@
 const keyboards = require("../utils/keyboards");
+const dynamicKeyboards = require("../utils/keyboardsDynamic");
 const RideRequest = require("../models/RideRequest");
 const User = require("../models/User");
 
 const { contextMap } = require("../utils/contextMap");
+
+// Helper to get proper driver menu
+async function getDriverMenuForUser(userId) {
+    const user = await User.findOne({ telegramId: userId });
+    if (!user) return null;
+    const activeOrdersCount = await RideRequest.countDocuments({
+        'offers.driverId': userId,
+        'offers.status': 'accepted',
+        status: 'matched'
+    });
+    const lang = user.language || 'uz_cyrillic';
+    return dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none', activeOrdersCount);
+}
 
 async function driverBidConversation(conversation, ctx) {
     // Extract requestId from in-memory Map
@@ -29,7 +43,8 @@ async function driverBidConversation(conversation, ctx) {
 
     if (text === "❌ Бекор қилиш") {
         await ctx.reply("❌ Таклиф бекор қилинди.", { reply_markup: { remove_keyboard: true } });
-        await ctx.reply("Асосий меню", { reply_markup: keyboards.driverMenu });
+        const driverKb = await getDriverMenuForUser(ctx.from.id);
+        if (driverKb) await ctx.reply("Асосий меню", { reply_markup: driverKb });
         return;
     }
 
@@ -42,7 +57,8 @@ async function driverBidConversation(conversation, ctx) {
 
         // Strict Numeric Check (allowing spaces)
         if (!/^\d[\d\s]*$/.test(customText)) {
-            await ctx.reply("⚠️ Илтимос, нархни фақат рақамларда ёзинг (сўз қўшмасдан). Масалан: 50000", { reply_markup: keyboards.driverMenu });
+            const driverKb = await getDriverMenuForUser(ctx.from.id);
+            await ctx.reply("⚠️ Илтимос, нархни фақат рақамларда ёзинг (сўз қўшмасдан). Масалан: 50000", { reply_markup: driverKb });
             return;
         }
 
@@ -106,7 +122,8 @@ async function driverBidConversation(conversation, ctx) {
         const updatedRequest = result.request;
         const driver = result.driver;
 
-        await ctx.reply(`✅ Сизнинг таклифингиз (${price} сўм) йўловчига юборилди!`, { reply_markup: keyboards.driverMenu });
+        const driverKb = await getDriverMenuForUser(ctx.from.id);
+        await ctx.reply(`✅ Сизнинг таклифингиз (${price} сўм) йўловчига юборилди!`, { reply_markup: driverKb });
 
         // Notify Passenger
         const newOffer = updatedRequest.offers[updatedRequest.offers.length - 1];

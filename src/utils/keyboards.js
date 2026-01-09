@@ -17,13 +17,7 @@ const passengerMenu = new Keyboard()
     .text("⚙️ Созламалар")
     .resized();
 
-const driverMenu = new Keyboard()
-    .text("🟢 Ишдаман").text("🔴 Дам оляпман")
-    .row()
-    .text("📡 ОЧИҚ БУЮРТМАЛАР")
-    .row()
-    .text("⚙️ Созламалар")
-    .resized();
+// driverMenu Removed - Use dynamicKeyboards.getDriverMenu instead!
 
 const requestContact = new Keyboard()
     .requestContact("📞 Телефон рақамни юбориш")
@@ -43,15 +37,19 @@ const carNameMap = {
     "cobalt": "Chevrolet Cobalt",
     "nexia3": "Chevrolet Nexia 3",
     "spark": "Chevrolet Spark",
+    "monza": "Chevrolet Monza",
+    "onix": "Chevrolet Onix",
+    "byd": "BYD",
+    "leap": "Leap Motor",
     "other": "Boshqa"
 };
 
 // Registration: Car Models
 const carModels = new InlineKeyboard()
-    .text("Chevrolet Gentra", "car_gentra").row()
-    .text("Chevrolet Cobalt", "car_cobalt").row()
-    .text("Chevrolet Nexia 3", "car_nexia3").row()
-    .text("Chevrolet Spark", "car_spark").row()
+    .text("Chevrolet Gentra", "car_gentra").text("Chevrolet Cobalt", "car_cobalt").row()
+    .text("Chevrolet Nexia 3", "car_nexia3").text("Chevrolet Spark", "car_spark").row()
+    .text("Chevrolet Monza", "car_monza").text("Chevrolet Onix", "car_onix").row()
+    .text("BYD", "car_byd").text("Leap Motor", "car_leap").row()
     .text("Boshqa", "car_other");
 
 // Filter Cars
@@ -214,7 +212,6 @@ const priceSuggestionParcel = new Keyboard()
 module.exports = {
     roleSelection,
     passengerMenu,
-    driverMenu,
     requestContact,
     cancelKeyboard,
     carModels,

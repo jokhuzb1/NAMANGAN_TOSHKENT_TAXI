@@ -3,7 +3,7 @@
         welcome: 'Assalomu alaykum!',
         role_select_title: 'Iltimos, rolingizni tanlang:',
         driver: '🚖 Haydovchi',
-        passenger: '🧍 Yo''lovchi',
+        passenger: '🧍 Yo\'lovchi',
         order_taxi: '🚕 Taksi buyurtma qilish',
         my_orders: '🚖 Mening Buyurtmam',
         send_parcel: '📦 Pochta yuborish',
@@ -17,16 +17,18 @@
         time_now: '🚀 Hozir (Tezkor)',
         time_today: '☀️ Bugun',
         time_tomorrow: '🌙 Ertaga',
-        seat_front: 'Old o''rindiq',
-        seat_back: 'Orqa o''rindiq',
-        seat_any: 'Farqi yo''q',
+        seat_front: 'Old o\'rindiq',
+        seat_back: 'Orqa o\'rindiq',
+        seat_any: 'Farqi yo\'q',
         verified: '✅ Tasdiqlangan',
-        call: '📞 Bog''lanish',
-        available_drivers: '👀 Bo''sh haydovchilar',
+        call: '📞 Bog\'lanish',
+        available_drivers: '👀 Bo\'sh haydovchilar',
         finish_route: '🏁 Yakunlash',
         rest_mode: '🔴 Dam olyapman',
         work_mode: '🟢 Ishdaman',
-        active_orders: '📡 OCHIQ BUYURTMALAR'
+        active_orders: '📡 OCHIQ BUYURTMALAR',
+        my_passengers: '👤 Mening Yo\'lovchilarim',
+        complete_all: '✅ Hammasini yakunlash'
     },
     uz_cyrillic: {
         welcome: 'Ассалому алайкум!',
@@ -55,12 +57,15 @@
         finish_route: '🏁 Якунлаш',
         rest_mode: '🔴 Дам оляпман',
         work_mode: '🟢 Ишдаман',
-        active_orders: '📡 ОЧИҚ БУЮРТМАЛАР'
+        active_orders: '📡 ОЧИҚ БУЮРТМАЛАР',
+        my_passengers: '👤 Менинг Йўловчиларим',
+        complete_all: '✅ Ҳаммасини якунлаш'
     }
 };
 
-function t(key, lang = 'uz_cyrillic') {
-    return dictionary[lang]?.[key] || dictionary['uz_cyrillic'][key] || key;
+function t(key, lang) {
+    const useLang = (lang && dictionary[lang]) ? lang : 'uz_cyrillic';
+    return dictionary[useLang]?.[key] || dictionary['uz_cyrillic'][key] || key;
 }
 
 function formatTime(date) {

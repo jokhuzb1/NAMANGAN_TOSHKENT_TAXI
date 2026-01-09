@@ -13,7 +13,7 @@ const { quickRequestConversation } = require("./conversations/quickRequest");
 const { contactActions } = require("./utils/keyboards");
 const { contextMap } = require("./utils/contextMap");
 const { broadcastRequest } = require("./utils/broadcastUtils");
-const { t } = require("./utils/i18n_fixed");
+const { t } = require("./utils/i18n");
 const dynamicKeyboards = require("./utils/keyboardsDynamic");
 
 // DB Connection moved to index.js
@@ -34,8 +34,8 @@ bot.use(limit({
     timeFrame: 2000, // 2 seconds
     limit: 1, // Allow 1 request per 2 seconds (Strict? Maybe 2 requests?) 
     // Button spamming: usually 1 click is processed, subseqent are ignored. 
-    // Let's set limit: 2 to allow fast double tap but block machine gun.
-    limit: 3,
+    // Let's set limit: 10 to allow fast tapping without getting stuck.
+    limit: 10,
     onLimitExceeded: async (ctx) => {
         try {
             if (ctx.callbackQuery) {
@@ -64,6 +64,17 @@ bot.use(createConversation(driverSettings));
 bot.use(createConversation(passengerSettings));
 bot.use(createConversation(quickRequestConversation));
 
+// Global Error Handler - Prevent crash on expired callbacks etc.
+bot.catch((err) => {
+    const ctx = err.ctx;
+    console.error(`[MAIN BOT ERROR] Error while handling update ${ctx.update.update_id}:`);
+    console.error(err.error.message || err.error);
+    // Try to gracefully respond if possible
+    if (ctx.callbackQuery) {
+        ctx.answerCallbackQuery("⚠️ Хатолик юз берди.").catch(() => { });
+    }
+});
+
 // Commands
 bot.command("start", async (ctx) => {
     let user = await User.findOne({ telegramId: ctx.from.id });
@@ -76,7 +87,15 @@ bot.command("start", async (ctx) => {
             return ctx.reply(t('welcome', lang), { reply_markup: dynamicKeyboards.getPassengerMenu(lang) });
         } else if (user.role === 'driver') {
             if (user.status === 'approved') {
-                return ctx.reply(t('welcome', lang), { reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none') });
+                // Check for active orders (accepted passengers)
+                const activeOrdersCount = await RideRequest.countDocuments({
+                    'offers.driverId': user.telegramId,
+                    'offers.status': 'accepted',
+                    status: 'matched'
+                });
+                return ctx.reply(t('welcome', lang), {
+                    reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none', activeOrdersCount)
+                });
             } else if (user.status === 'rejected') {
                 return ctx.reply("❌ " + t('cancel', lang), { reply_markup: dynamicKeyboards.getRoleSelection(lang) });
             } else {
@@ -238,6 +257,113 @@ bot.hears([
     }
 
     await ctx.reply(message, { parse_mode: "HTML", reply_markup: keyboard });
+});
+
+// Driver: View My Passengers (Active Orders)
+bot.hears(/^👥 Йўловчилар/, async (ctx) => {
+    try {
+        console.log("[DEBUG] Passengers button pressed by", ctx.from.id);
+        const user = await User.findOne({ telegramId: ctx.from.id });
+        if (!user || user.role !== 'driver') {
+            console.log("[DEBUG] Not a driver, ignoring");
+            return;
+        }
+
+        // Find all active orders for this driver
+        const activeOrders = await RideRequest.find({
+            'offers.driverId': ctx.from.id,
+            'offers.status': 'accepted',
+            status: 'matched'
+        }).sort({ createdAt: -1 });
+
+        console.log("[DEBUG] Found active orders:", activeOrders.length);
+
+        if (activeOrders.length === 0) {
+            const lang = 'uz_cyrillic';
+            return ctx.reply("✅ Сизда фаол йўловчилар йўқ.", {
+                reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none', 0)
+            });
+        }
+
+        let message = `<b>👥 Сизнинг йўловчиларингиз (${activeOrders.length} та):</b>\n\n`;
+        const kb = new InlineKeyboard();
+
+        for (let i = 0; i < activeOrders.length; i++) {
+            const order = activeOrders[i];
+            const passenger = await User.findOne({ telegramId: order.passengerId });
+            const passengerName = passenger ? passenger.name : 'Номаълум';
+            const passengerPhone = order.phone || (passenger ? passenger.phone : '') || 'Йўқ';
+            const formattedPhone = passengerPhone && passengerPhone !== 'Йўқ' && !passengerPhone.startsWith('+') ? '+' + passengerPhone : passengerPhone;
+
+            message += `${i + 1}. <b>${order.from} ➡️ ${order.to}</b>\n`;
+            message += `   👤 ${passengerName}\n`;
+            message += `   📞 ${formattedPhone}\n\n`;
+
+            kb.text(`✅ ${i + 1}-ни якунлаш`, `driver_complete_${order._id}`).row();
+        }
+
+        await ctx.reply(message, { parse_mode: "HTML", reply_markup: kb });
+    } catch (e) {
+        console.error("[ERROR] Passengers handler failed:", e);
+        await ctx.reply("⚠️ Хатолик юз берди. Қайта уриниб кўринг.").catch(() => { });
+    }
+});
+
+// Driver: Complete All Passengers at Once
+bot.hears([
+    t('complete_all', 'uz_latin'), t('complete_all', 'uz_cyrillic')
+], async (ctx) => {
+    try {
+        const user = await User.findOne({ telegramId: ctx.from.id });
+        if (!user || user.role !== 'driver') return;
+
+        // Find all active orders for this driver
+        const activeOrders = await RideRequest.find({
+            'offers.driverId': ctx.from.id,
+            'offers.status': 'accepted',
+            status: 'matched'
+        });
+
+        if (activeOrders.length === 0) {
+            return ctx.reply("✅ Сизда тугатиладиган сафар йўқ.");
+        }
+
+        let completedCount = 0;
+        const driver = user;
+
+        for (const order of activeOrders) {
+            order.status = 'completed';
+            order.completedAt = new Date();
+            await order.save();
+            completedCount++;
+
+            // Notify each passenger with rating prompt
+            try {
+                const ratingKb = new InlineKeyboard()
+                    .text("⭐️ 1", `rate_save_${ctx.from.id}_${order._id}_1`)
+                    .text("⭐️ 2", `rate_save_${ctx.from.id}_${order._id}_2`)
+                    .text("⭐️ 3", `rate_save_${ctx.from.id}_${order._id}_3`)
+                    .row()
+                    .text("⭐️ 4", `rate_save_${ctx.from.id}_${order._id}_4`)
+                    .text("⭐️ 5", `rate_save_${ctx.from.id}_${order._id}_5`);
+
+                await ctx.api.sendMessage(order.passengerId,
+                    `✅ <b>Сафарингиз якунланди!</b>\n\n📍 ${order.from} ➡️ ${order.to}\n\nИлтимос, ${driver.name || 'Ҳайдовчи'}ни баҳоланг:`,
+                    { parse_mode: "HTML", reply_markup: ratingKb }
+                );
+            } catch (e) {
+                console.error(`[ERROR] Failed to notify passenger ${order.passengerId}:`, e.message);
+            }
+        }
+
+        const lang = 'uz_cyrillic';
+        await ctx.reply(`🎉 ${completedCount} та сафар якунланди! Барча йўловчиларга хабар юборилди.`, {
+            reply_markup: dynamicKeyboards.getDriverMenu(lang, user.isOnline, user.activeRoute !== 'none', 0)
+        });
+    } catch (e) {
+        console.error("[ERROR] Complete All failed:", e);
+        await ctx.reply("⚠️ Хатолик юз берди.").catch(() => { });
+    }
 });
 
 // Driver Bidding Handlers
@@ -456,18 +582,16 @@ bot.on("callback_query:data", async (ctx, next) => {
         // Notify Driver that their offer was accepted
         const passenger = await User.findOne({ telegramId: ctx.from.id });
 
-        if (!passenger) {
-            console.error(`[ERROR] Passenger not found with telegramId: ${ctx.from.id}`);
-        } else {
-            const isCustom = updatedRequest.contactPhone ? true : false;
-            const displayPhoneRaw = isCustom ? updatedRequest.contactPhone : passenger.phone;
-            const passPhone = displayPhoneRaw.startsWith('+') ? displayPhoneRaw : '+' + displayPhoneRaw;
-            const passName = isCustom && updatedRequest.createdBy === 'admin' ? "Mijoz (Admin)" : passenger.name;
+        // Use fallback data if passenger not in User table
+        const isCustom = updatedRequest.contactPhone ? true : false;
+        let displayPhoneRaw = updatedRequest.contactPhone || updatedRequest.phone || (passenger?.phone) || 'Йўқ';
+        const passPhone = displayPhoneRaw && displayPhoneRaw !== 'Йўқ' && !displayPhoneRaw.startsWith('+') ? '+' + displayPhoneRaw : displayPhoneRaw;
+        const passName = isCustom && updatedRequest.createdBy === 'admin' ? "Мижоз (Админ)" : (passenger?.name || updatedRequest.passengerName || 'Йўловчи');
 
-            console.log(`[DEBUG] Sending acceptance notification to driver ${driver.telegramId}`);
+        console.log(`[DEBUG] Sending acceptance notification to driver ${driver.telegramId}`);
 
-            // Build detailed notification message for driver
-            const driverNotificationMsg = `
+        // Build detailed notification message for driver
+        const driverNotificationMsg = `
 🎉 <b>ТАКЛИФИНГИЗ ҚАБУЛ ҚИЛИНДИ!</b>
 
 <b>👤 Йўловчи:</b> ${passName}
@@ -483,15 +607,32 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
 <i>Йўловчи билан боғланинг!</i>
 `;
 
-            try {
-                await ctx.api.sendMessage(driver.telegramId, driverNotificationMsg, {
-                    parse_mode: "HTML",
-                    reply_markup: keyboards.contactActions(passenger)
-                });
-                console.log(`[NOTIFY] Driver ${driver.telegramId} notified about accepted offer - SUCCESS`);
-            } catch (e) {
-                console.error(`[ERROR] Failed to notify driver ${driver.telegramId} about accepted offer:`, e.message);
-            }
+        try {
+            // Create contact buttons - try both passenger User and direct contact
+            const contactKb = passenger ? keyboards.contactActions(passenger) : new InlineKeyboard();
+
+            await ctx.api.sendMessage(driver.telegramId, driverNotificationMsg, {
+                parse_mode: "HTML",
+                reply_markup: contactKb
+            });
+            console.log(`[NOTIFY] Driver ${driver.telegramId} notified about accepted offer - SUCCESS`);
+
+            // FORCE MENU UPDATE for Driver
+            const activeOrdersCount = await RideRequest.countDocuments({
+                'offers.driverId': driver.telegramId,
+                'offers.status': 'accepted',
+                status: 'matched'
+            });
+
+            const lang = driver.language || 'uz_cyrillic';
+            // We need to require dynamicKeyboards here if not available, but it should be available in scope
+            // Assuming dynamicKeyboards is available (it is required at top of bot.js)
+            await ctx.api.sendMessage(driver.telegramId, "⚡️ Янги буюртма! Меню янгиланди.", {
+                reply_markup: dynamicKeyboards.getDriverMenu(lang, driver.isOnline, driver.activeRoute !== 'none', activeOrdersCount)
+            });
+
+        } catch (e) {
+            console.error(`[ERROR] Failed to notify driver ${driver.telegramId} about accepted offer:`, e.message);
         }
 
         // Send Voice Message to Driver if exists
@@ -615,6 +756,109 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
         return;
     }
 
+    // Driver marks passenger trip as complete
+    if (data.startsWith("driver_complete_")) {
+        const requestId = data.replace("driver_complete_", "");
+        const request = await RideRequest.findById(requestId);
+
+        if (!request) {
+            return ctx.answerCallbackQuery({ text: "⚠️ Буюртма топилмади.", show_alert: true });
+        }
+
+        // Mark as completed
+        request.status = 'completed';
+        request.completedAt = new Date();
+        await request.save();
+
+        // Notify passenger with rating prompt
+        try {
+            const acceptedOffer = request.offers.find(o => o.status === 'accepted');
+            const driver = await User.findOne({ telegramId: ctx.from.id });
+            const driverName = driver ? driver.name : 'Ҳайдовчи';
+
+            const ratingKb = new InlineKeyboard()
+                .text("⭐️ 1", `rate_save_${ctx.from.id}_${requestId}_1`)
+                .text("⭐️ 2", `rate_save_${ctx.from.id}_${requestId}_2`)
+                .text("⭐️ 3", `rate_save_${ctx.from.id}_${requestId}_3`)
+                .row()
+                .text("⭐️ 4", `rate_save_${ctx.from.id}_${requestId}_4`)
+                .text("⭐️ 5", `rate_save_${ctx.from.id}_${requestId}_5`);
+
+            await ctx.api.sendMessage(request.passengerId,
+                `✅ <b>Сафарингиз якунланди!</b>\n\n📍 ${request.from} ➡️ ${request.to}\n\nИлтимос, ${driverName}ни баҳоланг:`,
+                { parse_mode: "HTML", reply_markup: ratingKb }
+            );
+        } catch (e) {
+            console.error("[ERROR] Failed to notify passenger about trip completion:", e.message);
+        }
+
+        // Check remaining active orders for this driver
+        const remainingOrders = await RideRequest.countDocuments({
+            'offers.driverId': ctx.from.id,
+            'offers.status': 'accepted',
+            status: 'matched'
+        });
+
+        await ctx.answerCallbackQuery({ text: "✅ Сафар якунланди!", show_alert: true });
+
+        // Update message to show completion for this specific passenger
+        try {
+            await ctx.editMessageText(`✅ Сафар якунланди!`, { reply_markup: { inline_keyboard: [] } });
+        } catch (e) { /* Ignore edit errors */ }
+
+        // If no more orders, show updated menu
+        if (remainingOrders === 0) {
+            const driver = await User.findOne({ telegramId: ctx.from.id });
+
+            // Reset Active Route
+            driver.activeRoute = 'none';
+            await driver.save();
+
+            // Send "Complete Trip & Start Again?" Prompt
+            const startAgainKb = new InlineKeyboard()
+                .text("✅ Янги қатновни бошлаш", "start_new_trip_flow").row()
+                .text("❌ Йўқ, Дам оламан", "driver_rest_mode");
+
+            await ctx.reply("🏁 <b>Сафар тўлиқ якунланди!</b>\n\nЯна ишга киришасизми ёки дам оласизми?", {
+                parse_mode: "HTML",
+                reply_markup: startAgainKb
+            });
+        } else {
+            await ctx.reply(`✅ Сафар якунланди!\n\nҚолган йўловчилар: ${remainingOrders} та.`);
+        }
+        return;
+    }
+
+    // Handle Start New Trip Flow
+    if (data === "start_new_trip_flow") {
+        await ctx.answerCallbackQuery();
+        await ctx.deleteMessage(); // clear the prompt
+
+        // Show route selection
+        await ctx.reply("📍 Qaysi yo'nalishda yurasiz?", {
+            reply_markup: keyboards.routeSelection
+        });
+        return;
+    }
+
+    // Handle Driver Rest Mode
+    if (data === "driver_rest_mode") {
+        const user = await User.findOne({ telegramId: ctx.from.id });
+        if (user) {
+            user.isOnline = false;
+            await user.save();
+        }
+        await ctx.answerCallbackQuery("Dam olish rejimi yoqildi 😴");
+        await ctx.deleteMessage();
+
+        const lang = user?.language || 'uz_cyrillic';
+        // Send Offline Menu
+        await ctx.reply("😴 Dam olish rejimi. Qachon ishga qaytmoqchi bo'lsangiz, tugmani bosing.", {
+            reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false, 0)
+        });
+        return;
+    }
+
     // Handle Cancel Confirmation
     if (data.startsWith("confirm_cancel_")) {
         const requestId = data.replace("confirm_cancel_", "");
@@ -682,7 +926,12 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
 
         const kb = new InlineKeyboard();
         if (driverId) {
-            kb.text("⭐️ Ҳайдовчини баҳолаш", `rate_driver_${driverId}_${requestId}`);
+            kb.text("⭐️ 1", `rate_save_${driverId}_${requestId}_1`)
+                .text("⭐️ 2", `rate_save_${driverId}_${requestId}_2`)
+                .text("⭐️ 3", `rate_save_${driverId}_${requestId}_3`)
+                .row()
+                .text("⭐️ 4", `rate_save_${driverId}_${requestId}_4`)
+                .text("⭐️ 5", `rate_save_${driverId}_${requestId}_5`);
         }
 
         await ctx.editMessageText("✅ Сафарингиз учун раҳмат! Буюртма якунланди.", { reply_markup: kb });
@@ -732,24 +981,34 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
             // Pre-fetch ratings
             const Review = require("./models/Review");
 
+
+            const targetIds = drivers.map(d => d.telegramId);
+            const reviewsMap = new Map();
+
+            try {
+                const allReviews = await Review.find({ targetId: { $in: targetIds } });
+                for (const r of allReviews) {
+                    if (!reviewsMap.has(r.targetId)) reviewsMap.set(r.targetId, []);
+                    reviewsMap.get(r.targetId).push(r);
+                }
+            } catch (e) { console.error("Bulk review fetch error:", e); }
+
             for (const d of drivers) {
                 const cm = keyboards.carNameMap[d.carModel] || d.carModel;
                 const verified = d.isVerified ? "✅ " : "";
 
                 // Calculate Rating
                 let avgRating = "N/A";
-                try {
-                    const reviews = await Review.find({ targetId: d.telegramId });
-                    if (reviews.length > 0) {
-                        const sum = reviews.reduce((a, b) => a + b.rating, 0);
-                        avgRating = (sum / reviews.length).toFixed(1);
-                    }
-                } catch (e) { console.error(e); }
+                const dReviews = reviewsMap.get(d.telegramId) || [];
+
+                if (dReviews.length > 0) {
+                    const sum = dReviews.reduce((a, b) => a + b.rating, 0);
+                    avgRating = (sum / dReviews.length).toFixed(1);
+                }
 
                 const starPart = avgRating !== 'N/A' ? ` | ⭐️ ${avgRating}` : '';
 
-                keyboard.text(`🚗 ${verified}${cm}${starPart}`, `public_driver_info_${d._id}`)
-                    .text("📩", `direct_offer_${d._id}`).row();
+                keyboard.text(`🚗 ${verified}${cm}${starPart}`, `public_driver_info_${d._id}`).row();
             }
         }
 
@@ -837,7 +1096,6 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
 Алоқага чиқиш ёки Таклиф юбориш учун тугмалардан фойдаланинг:
 `;
         const keyboard = new InlineKeyboard()
-            .text("📩 Таклиф Юбориш", `direct_offer_${driver._id}`).row()
             .text("📞 Алоқага чиқиш", `request_contact_share_${driver._id}`).row()
             .text("📷 Машина Расми", `view_car_offer_${driver._id}`).row() // Reuse handler
             .text("🔙 Орқага", `ld_${driver.activeRoute}_p0_mall`);
@@ -918,11 +1176,15 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
                 return ctx.reply("Ҳайдовчи йўналиши аниқланмади.");
             }
 
-            ctx.session.quickOffer = {
-                driverId: driverId,
-                from: routeInfo.from,
-                to: routeInfo.to
-            };
+            // Use contextMap to pass data safely to conversation
+            const { contextMap } = require("./utils/contextMap");
+            contextMap.set(ctx.from.id, {
+                quickOffer: {
+                    driverId: driverId,
+                    from: routeInfo.from,
+                    to: routeInfo.to
+                }
+            });
 
             await ctx.conversation.enter("quickRequestConversation");
             return;
@@ -1256,23 +1518,10 @@ bot.hears([
     });
 });
 
-bot.hears([
-    t('finish_route', 'uz_latin'), t('finish_route', 'uz_cyrillic')
-], async (ctx) => {
-    let user = await User.findOne({ telegramId: ctx.from.id });
-    if (user) {
-        user.activeRoute = 'none';
-        user.isOnline = false;
-        await user.save();
-        const lang = user.language || 'uz_cyrillic';
-        await ctx.reply("🏁", { reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false) });
-    }
-});
-
-
 // OCHIQ BUYURTMALAR (RADAR)
 bot.hears([
-    t('active_orders', 'uz_latin'), t('active_orders', 'uz_cyrillic')
+    t('active_orders', 'uz_latin'), t('active_orders', 'uz_cyrillic'),
+    "📋 Радар"
 ], async (ctx) => {
     // Check if driver is active
     const user = await User.findOne({ telegramId: ctx.from.id });
@@ -1400,75 +1649,6 @@ bot.callbackQuery(/^complete_ride_(.+)$/, async (ctx) => {
     }
 });
 
-// Complete All Handler
-bot.hears([
-    t('complete_all', 'uz_latin'), t('complete_all', 'uz_cyrillic')
-], async (ctx) => {
-    const user = await User.findOne({ telegramId: ctx.from.id });
-    if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
-
-    const lang = user.language || 'uz_cyrillic';
-
-    // Find all active requests for this driver
-    const activeRequests = await RideRequest.find({
-        "offers": {
-            $elemMatch: {
-                driverId: ctx.from.id,
-                status: 'accepted'
-            }
-        },
-        status: 'matched'
-    });
-
-    if (activeRequests.length === 0) {
-        // Even if no passengers, ask if they want to start working on new route
-        await ctx.reply("Сизда ҳозирча фаол йўловчилар йўқ.\n\n🔄 Янги йўналишда ишлашни бошлайсизми?", {
-            reply_markup: keyboards.routeSelection
-        });
-        return;
-    }
-
-    // Complete all requests
-    for (const req of activeRequests) {
-        req.status = 'completed';
-        await req.save();
-
-        // Notify Passenger
-        try {
-            const kb = new InlineKeyboard();
-            [1, 2, 3, 4, 5].forEach(star => {
-                kb.text(star + " ⭐️", `rate_save_${ctx.from.id}_${req._id}_${star}`);
-            });
-
-            await ctx.api.sendMessage(req.passengerId, `🏁 <b>Siz manzilga yetib keldingiz!</b>\n\nHaydovchi safarni yakunladi. Iltimos, xizmat sifatini baholang:`, {
-                parse_mode: "HTML",
-                reply_markup: kb
-            });
-        } catch (e) {
-            console.error("Failed to notify passenger:", e);
-        }
-    }
-
-    await ctx.reply(`✅ <b>Барча буюртмалар якунланди!</b>\n\nЖами: ${activeRequests.length} та йўловчи/почта.\n\n🔄 Янги йўналишда ишлашни бошлайсизми?`, {
-        parse_mode: "HTML",
-        reply_markup: keyboards.routeSelection
-    });
-});
-
-bot.hears([
-    t('finish_route', 'uz_latin'), t('finish_route', 'uz_cyrillic')
-], async (ctx) => {
-    let user = await User.findOne({ telegramId: ctx.from.id });
-    if (user) {
-        user.activeRoute = 'none'; // Clear route but maybe keep online? Or go offline?
-        user.isOnline = false; // Usually finish means stop working
-        await user.save();
-
-        const lang = user.language || 'uz_cyrillic';
-        await ctx.reply("🏁", { reply_markup: dynamicKeyboards.getDriverMenu(lang, false, false) });
-    }
-});
-
 // Driver Route Selection Handler (Outside of conversation)
 bot.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
@@ -1503,10 +1683,21 @@ bot.hears([
     // Check role
     const user = await User.findOne({ telegramId: ctx.from.id });
     if (user && user.role === 'driver') {
-        await ctx.conversation.enter("driverSettings");
+        try {
+            await ctx.conversation.exit();
+            await ctx.conversation.enter("driverSettings");
+        } catch (e) {
+            console.error("Settings crash prevented:", e);
+            await ctx.reply("⚠️ Хатолик юз берди. Илтимос қайта уриниб кўринг.");
+        }
         return;
     } else if (user && user.role === 'passenger') {
-        await ctx.conversation.enter("passengerSettings");
+        try {
+            await ctx.conversation.exit();
+            await ctx.conversation.enter("passengerSettings");
+        } catch (e) {
+            console.error("Settings crash prevented:", e);
+        }
         return;
     }
     await ctx.reply("🛠 Sozlamalar.");

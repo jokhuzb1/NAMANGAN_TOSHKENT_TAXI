@@ -1,12 +1,14 @@
 const { InlineKeyboard } = require('grammy');
 const RideRequest = require('../models/RideRequest');
 const User = require('../models/User');
-const { t } = require('../utils/i18n_fixed'); // Actually we can just hardcode if we are forcing Cyrillic
+const { t } = require('../utils/i18n');
+const { contextMap } = require('../utils/contextMap');
 
 // Temporary conversation to handle Quick Request creation
 async function quickRequestConversation(conversation, ctx) {
-    // 1. Get Info from Session
-    const quickInfo = ctx.session.quickOffer;
+    // 1. Get Info from ContextMap (Session workaround)
+    const mapData = await conversation.external(() => contextMap.get(ctx.from.id));
+    const quickInfo = mapData ? mapData.quickOffer : null;
     if (!quickInfo || !quickInfo.driverId) {
         await ctx.reply("⚠️ Хатолик: Маълумотлар йўқолган.");
         return;
