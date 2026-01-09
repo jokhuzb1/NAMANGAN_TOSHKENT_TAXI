@@ -1405,19 +1405,53 @@ bot.hears("🟢 Ishdaman", async (ctx) => {
 });
 
 // Radar Handler
-// Radar Pagination Logic
-async function sendRadarPage(ctx, page) {
+// Radar Pagination Logic with 24-hour filtering
+// isOlder: false = last 24 hours, true = older than 24 hours
+async function sendRadarPage(ctx, page, isOlder = false) {
     const user = await User.findOne({ telegramId: ctx.from.id });
     if (!user || user.role !== 'driver') return ctx.reply("Сиз ҳайдовчи эмассиз.");
 
     const limit = 10;
     const skip = page * limit;
 
-    const total = await RideRequest.countDocuments({ status: 'searching' });
-    const requests = await RideRequest.find({ status: 'searching' })
+    // Calculate 24 hours ago
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // Build query based on time filter
+    const baseQuery = { status: 'searching' };
+    let dateFilter;
+    let headerTitle;
+    let otherButtonText;
+    let otherButtonCallback;
+
+    if (isOlder) {
+        // Show offers OLDER than 24 hours
+        dateFilter = { createdAt: { $lt: twentyFourHoursAgo } };
+        headerTitle = "📆 КЕЧАГИ БУЮРТМАЛАР";
+        otherButtonText = "🕐 Бугунги";
+        otherButtonCallback = "radar_today_p_0";
+    } else {
+        // Show offers from LAST 24 hours
+        dateFilter = { createdAt: { $gte: twentyFourHoursAgo } };
+        headerTitle = "📡 БУГУНГИ БУЮРТМАЛАР";
+        otherButtonText = "📆 Кечаги";
+        otherButtonCallback = "radar_older_p_0";
+    }
+
+    const query = { ...baseQuery, ...dateFilter };
+
+    const total = await RideRequest.countDocuments(query);
+    const requests = await RideRequest.find(query)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit);
+
+    // Count the other category for button display
+    const otherQuery = isOlder
+        ? { ...baseQuery, createdAt: { $gte: twentyFourHoursAgo } }
+        : { ...baseQuery, createdAt: { $lt: twentyFourHoursAgo } };
+    const otherCount = await RideRequest.countDocuments(otherQuery);
 
     // If triggered by pagination callback, delete the old navigation message to clean up
     if (ctx.callbackQuery) {
@@ -1426,12 +1460,28 @@ async function sendRadarPage(ctx, page) {
         } catch (e) { } // Ignore if already deleted
     }
 
+    const totalPages = Math.ceil(total / limit);
+
     if (requests.length === 0) {
-        if (page > 0) return ctx.answerCallbackQuery("Бошқа саҳифа йўқ.");
-        return ctx.reply("📂 Ҳозирча фаол буюртмалар йўқ.");
+        if (page > 0) {
+            if (ctx.callbackQuery) await ctx.answerCallbackQuery("Бошқа саҳифа йўқ.");
+            return;
+        }
+
+        // Show empty message with option to view other category
+        const emptyKb = new InlineKeyboard();
+        if (otherCount > 0) {
+            emptyKb.text(`${otherButtonText} (${otherCount} та)`, otherButtonCallback);
+        }
+
+        const emptyMsg = isOlder
+            ? "📂 Кечаги буюртмалар йўқ."
+            : "📂 Охирги 24 соатда фаол буюртмалар йўқ.";
+
+        return ctx.reply(emptyMsg, { reply_markup: emptyKb.inline_keyboard.length > 0 ? emptyKb : undefined });
     }
 
-    await ctx.reply(`📡 <b>ОЧИҚ БУЮРТМАЛАР (Саҳифа ${page + 1}):</b>`, { parse_mode: "HTML" });
+    await ctx.reply(`${headerTitle} (Саҳифа ${page + 1}/${totalPages}):`, { parse_mode: "HTML" });
 
     // Send each request as a separate card
     for (let i = 0; i < requests.length; i++) {
@@ -1441,7 +1491,7 @@ async function sendRadarPage(ctx, page) {
         const details = req.type === 'parcel' ? `📦 ${req.packageType}` : `💺 ${req.seats} киши${req.seatType === 'front' ? " (⚠️ ОЛДИ ўРИНДИҚ)" : ""}`;
         const timeCreated = formatDateTime(req.createdAt);
 
-        let msg = `КЛИЕНТ #${itemNum}\n` +
+        let msg = `#${itemNum}\n` +
             `${typeIcon} 📍 <b>${req.from.toUpperCase()} ➡️ ${req.to.toUpperCase()}</b>\n` +
             `📅 ${timeCreated} | ⏰ ${req.time}\n` +
             `${details}\n`;
@@ -1473,25 +1523,51 @@ async function sendRadarPage(ctx, page) {
     }
 
     // Send Navigation Controls as the last message
-    const navRow = [];
-    if (page > 0) navRow.push({ text: "⬅️ Олдинги", callback_data: `radar_p_${page - 1}` });
-    if (skip + requests.length < total) navRow.push({ text: "Кейинги ➡️", callback_data: `radar_p_${page + 1}` });
+    const paginationPrefix = isOlder ? "radar_older_p_" : "radar_today_p_";
 
     const navKeyboard = new InlineKeyboard();
-    if (navRow.length > 0) navKeyboard.row(...navRow);
-    navKeyboard.row().text("🔄 Янгилаш", `radar_p_${page}`);
 
-    await ctx.reply(`📄 <b>Саҳифа ${page + 1}</b> (Жами: ${total} та)`, {
+    // Pagination row
+    const navRow = [];
+    if (page > 0) navRow.push({ text: "⬅️ Олдинги", callback_data: `${paginationPrefix}${page - 1}` });
+    if (skip + requests.length < total) navRow.push({ text: "Кейинги ➡️", callback_data: `${paginationPrefix}${page + 1}` });
+    if (navRow.length > 0) navKeyboard.row(...navRow);
+
+    // Refresh button
+    navKeyboard.row().text("🔄 Янгилаш", `${paginationPrefix}${page}`);
+
+    // Toggle today/older button (only show if other category has items)
+    if (otherCount > 0) {
+        navKeyboard.row().text(`${otherButtonText} (${otherCount} та)`, otherButtonCallback);
+    }
+
+    await ctx.reply(`📄 <b>Саҳифа ${page + 1}/${totalPages}</b> (Жами: ${total} та)`, {
         parse_mode: "HTML",
         reply_markup: navKeyboard
     });
 }
 
-bot.hears("📡 OCHIQ BUYURTMALAR", (ctx) => sendRadarPage(ctx, 0));
+// Entry point - shows today's (last 24h) offers
+bot.hears("📡 OCHIQ BUYURTMALAR", (ctx) => sendRadarPage(ctx, 0, false));
 
+// Pagination for TODAY's offers (last 24 hours)
+bot.callbackQuery(/radar_today_p_(\d+)/, async (ctx) => {
+    const page = parseInt(ctx.match[1]);
+    await sendRadarPage(ctx, page, false);
+    await ctx.answerCallbackQuery();
+});
+
+// Pagination for OLDER offers (more than 24 hours)
+bot.callbackQuery(/radar_older_p_(\d+)/, async (ctx) => {
+    const page = parseInt(ctx.match[1]);
+    await sendRadarPage(ctx, page, true);
+    await ctx.answerCallbackQuery();
+});
+
+// Legacy callback handler for backward compatibility
 bot.callbackQuery(/radar_p_(\d+)/, async (ctx) => {
     const page = parseInt(ctx.match[1]);
-    await sendRadarPage(ctx, page);
+    await sendRadarPage(ctx, page, false);
     await ctx.answerCallbackQuery();
 });
 
@@ -1518,7 +1594,8 @@ bot.hears([
     });
 });
 
-// OCHIQ BUYURTMALAR (RADAR)
+// OCHIQ BUYURTMALAR (RADAR) - Route-specific version
+// Redirects to the main radar with route context
 bot.hears([
     t('active_orders', 'uz_latin'), t('active_orders', 'uz_cyrillic'),
     "📋 Радар"
@@ -1535,40 +1612,8 @@ bot.hears([
         });
     }
 
-    const routeMap = { 'tash_nam': { from: 'Tashkent', to: 'Namangan' }, 'nam_tash': { from: 'Namangan', to: 'Tashkent' } };
-    const route = routeMap[user.activeRoute];
-
-    if (!route) return ctx.reply("Хатолик: Йўналиш аниқланмади.");
-
-    // Find Active Requests
-    const requests = await RideRequest.find({
-        status: 'searching', // Only open requests
-        from: route.from,
-        to: route.to,
-        // Optional: filter by date to avoid stale?
-    }).sort({ createdAt: -1 }).limit(10); // Show last 10
-
-    if (requests.length === 0) {
-        return ctx.reply("Ҳозирча бу йўналишда фаол буюртмалар йўқ.");
-    }
-
-    await ctx.reply(`📡 <b>Очиқ Буюртмалар (${requests.length}):</b>`, { parse_mode: "HTML" });
-
-    for (const req of requests) {
-        let msg = `⏰ <b>${req.time}</b>\n📍 ${req.district ? req.district : 'Манзил'}\n`;
-        if (req.type === 'parcel') msg += `📦 <b>Почта:</b> ${req.packageType}`;
-        else msg += `💺 <b>Жой:</b> ${req.seats}`;
-
-        // Check if admin order - show different button
-        let kb;
-        if (req.createdBy === 'admin') {
-            msg += `\n\n<i>(Тезкор буюртма - рақамни олинг)</i>`;
-            kb = new InlineKeyboard().text("📞 Рақамни олиш", `take_admin_${req._id}`);
-        } else {
-            kb = new InlineKeyboard().text("🙋‍♂️ Таклиф бериш", `bid_${req._id}`);
-        }
-        await ctx.reply(msg, { parse_mode: "HTML", reply_markup: kb });
-    }
+    // Use the unified radar function
+    await sendRadarPage(ctx, 0, false);
 });
 
 bot.hears([
