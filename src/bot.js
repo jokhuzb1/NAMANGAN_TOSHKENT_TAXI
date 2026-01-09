@@ -30,22 +30,44 @@ bot.use(async (ctx, next) => {
 
 // Rate Limiter (Anti-Spam)
 const { limit } = require("@grammyjs/ratelimiter");
+
+// Track when we last sent a rate limit warning to each user (to avoid spamming the warning)
+const rateLimitWarnings = new Map();
+const WARNING_COOLDOWN = 5000; // Only send warning once per 5 seconds
+
 bot.use(limit({
     timeFrame: 2000, // 2 seconds
     limit: 10, // Allow 10 requests per 2 seconds to handle fast tapping
     onLimitExceeded: async (ctx) => {
+        const userId = ctx.from?.id;
+        const now = Date.now();
+        const lastWarning = rateLimitWarnings.get(userId) || 0;
+
+        console.log(`[SPAM] User ${userId} is rate limited.`);
+
         try {
             if (ctx.callbackQuery) {
-                await ctx.answerCallbackQuery({ text: "⚠️ Iltimos, sekinroq boshing!", show_alert: true });
-            } else {
-                // For messages, we might not want to reply every time to avoid flooding
-                // Just ignore or log
-                console.log(`[SPAM] User ${ctx.from.id} is spamming.`);
+                // Always answer callback queries to prevent loading state
+                await ctx.answerCallbackQuery({ text: "⚠️ Илтимос, секинроқ босинг!", show_alert: true });
+            } else if (now - lastWarning > WARNING_COOLDOWN) {
+                // For messages, only warn once per cooldown period
+                rateLimitWarnings.set(userId, now);
+                await ctx.reply("⚠️ Илтимос, секинроқ босинг! Бот ишлаяпти, бироз кутинг.");
             }
         } catch (e) { } // Ignore errors if user blocked etc
     },
     keyGenerator: (ctx) => ctx.from?.id,
 }));
+
+// Cleanup old rate limit warning entries every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, timestamp] of rateLimitWarnings.entries()) {
+        if (now - timestamp > 60000) { // Remove entries older than 1 minute
+            rateLimitWarnings.delete(userId);
+        }
+    }
+}, 10 * 60 * 1000);
 
 // Middleware
 bot.use(session({ initial: () => ({}) }));
