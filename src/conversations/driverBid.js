@@ -3,7 +3,7 @@ const dynamicKeyboards = require("../utils/keyboardsDynamic");
 const RideRequest = require("../models/RideRequest");
 const User = require("../models/User");
 
-const { contextMap } = require("../utils/contextMap");
+const { getWithTTL, deleteEntry } = require("../utils/contextMap");
 
 // Helper to get proper driver menu
 async function getDriverMenuForUser(userId) {
@@ -19,14 +19,17 @@ async function getDriverMenuForUser(userId) {
 }
 
 async function driverBidConversation(conversation, ctx) {
-    // Extract requestId from in-memory Map
-    const requestId = await conversation.external(() => contextMap.get(ctx.from.id));
+    // Extract requestId from in-memory Map (with TTL support)
+    const requestId = await conversation.external(() => getWithTTL(ctx.from.id));
 
     console.log(`[DEBUG] Retrieved RequestId from Map: '${requestId}'`);
 
     if (!requestId) {
         return ctx.reply("⚠️ Хатолик: Буюртма топилмади (Сессия вақти тугаган бўлиши мумкин).");
     }
+
+    // Clean up the map entry immediately after reading
+    await conversation.external(() => deleteEntry(ctx.from.id));
 
     // Check request type to show correct keyboard
     let requestType = 'passenger';

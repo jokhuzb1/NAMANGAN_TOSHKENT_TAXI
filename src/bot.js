@@ -11,7 +11,7 @@ const { driverBidConversation } = require("./conversations/driverBid");
 const { driverSettings, passengerSettings } = require("./conversations/settings");
 const { quickRequestConversation } = require("./conversations/quickRequest");
 const { contactActions } = require("./utils/keyboards");
-const { contextMap } = require("./utils/contextMap");
+const { contextMap, setWithTTL, getWithTTL, deleteEntry } = require("./utils/contextMap");
 const { broadcastRequest } = require("./utils/broadcastUtils");
 const { t, formatDateTime } = require("./utils/i18n");
 const dynamicKeyboards = require("./utils/keyboardsDynamic");
@@ -32,10 +32,7 @@ bot.use(async (ctx, next) => {
 const { limit } = require("@grammyjs/ratelimiter");
 bot.use(limit({
     timeFrame: 2000, // 2 seconds
-    limit: 1, // Allow 1 request per 2 seconds (Strict? Maybe 2 requests?) 
-    // Button spamming: usually 1 click is processed, subseqent are ignored. 
-    // Let's set limit: 10 to allow fast tapping without getting stuck.
-    limit: 10,
+    limit: 10, // Allow 10 requests per 2 seconds to handle fast tapping
     onLimitExceeded: async (ctx) => {
         try {
             if (ctx.callbackQuery) {
@@ -474,8 +471,8 @@ bot.on("callback_query:data", async (ctx, next) => {
 
         console.log(`[DEBUG] Bid clicked. RequestId extracted: '${requestId}'`);
 
-        // Use Map fallback
-        contextMap.set(ctx.from.id, requestId);
+        // Use Map with TTL for automatic cleanup
+        setWithTTL(ctx.from.id, requestId);
         console.log(`[DEBUG] Map updated for user ${ctx.from.id}: ${requestId}`);
 
         await ctx.answerCallbackQuery();
@@ -1176,9 +1173,8 @@ ${updatedRequest.district ? `<b>🚩 Манзил:</b> ${updatedRequest.district
                 return ctx.reply("Ҳайдовчи йўналиши аниқланмади.");
             }
 
-            // Use contextMap to pass data safely to conversation
-            const { contextMap } = require("./utils/contextMap");
-            contextMap.set(ctx.from.id, {
+            // Use contextMap with TTL to pass data safely to conversation
+            setWithTTL(ctx.from.id, {
                 quickOffer: {
                     driverId: driverId,
                     from: routeInfo.from,
@@ -1753,9 +1749,6 @@ bot.hears([
 // Keeping this as a comment for reference.
 // bot.hears(t('available_drivers'...) - DELETED, replaced by enhanced ld_ flow.
 
-// Handle Errors
-bot.catch((err) => {
-    console.error("Bot Error:", err);
-});
+// Note: Main error handler (bot.catch) is defined at the top of the file after middleware setup.
 
 module.exports = bot;

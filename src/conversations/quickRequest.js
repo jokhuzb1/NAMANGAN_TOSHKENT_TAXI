@@ -2,17 +2,20 @@ const { InlineKeyboard } = require('grammy');
 const RideRequest = require('../models/RideRequest');
 const User = require('../models/User');
 const { t } = require('../utils/i18n');
-const { contextMap } = require('../utils/contextMap');
+const { getWithTTL, deleteEntry } = require('../utils/contextMap');
 
 // Temporary conversation to handle Quick Request creation
 async function quickRequestConversation(conversation, ctx) {
-    // 1. Get Info from ContextMap (Session workaround)
-    const mapData = await conversation.external(() => contextMap.get(ctx.from.id));
+    // 1. Get Info from ContextMap with TTL support
+    const mapData = await conversation.external(() => getWithTTL(ctx.from.id));
     const quickInfo = mapData ? mapData.quickOffer : null;
     if (!quickInfo || !quickInfo.driverId) {
         await ctx.reply("⚠️ Хатолик: Маълумотлар йўқолган.");
         return;
     }
+
+    // Clean up the map entry immediately after reading
+    await conversation.external(() => deleteEntry(ctx.from.id));
 
     const { driverId, from, to } = quickInfo;
 
