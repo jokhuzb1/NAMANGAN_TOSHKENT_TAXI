@@ -21,14 +21,37 @@ adminBot.use(conversations());
 adminBot.use(createConversation(addAdminConversation));
 adminBot.use(createConversation(adminCreateOrderConversation));
 
+// Error Notification ID (receives error alerts)
+const ERROR_NOTIFY_ID = 5887482755;
+
 // Global Error Handler - Prevent crash on expired callbacks etc.
-adminBot.catch((err) => {
+adminBot.catch(async (err) => {
     const ctx = err.ctx;
-    console.error(`[ADMIN BOT ERROR] Error while handling update ${ctx.update.update_id}:`);
-    console.error(err.error.message || err.error);
+    const errorMsg = err.error?.message || err.error || 'Unknown error';
+    const updateId = ctx?.update?.update_id || 'N/A';
+    const userId = ctx?.from?.id || 'N/A';
+    const updateType = ctx?.update ? Object.keys(ctx.update)[1] : 'N/A';
+
+    console.error(`[ADMIN BOT ERROR] Update ${updateId}:`);
+    console.error(errorMsg);
+
     // Try to gracefully respond if possible
-    if (ctx.callbackQuery) {
+    if (ctx?.callbackQuery) {
         ctx.answerCallbackQuery("⚠️ Хатолик юз берди.").catch(() => { });
+    }
+
+    // Send error notification
+    try {
+        const now = new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' });
+        const notification = `🚨 <b>ADMIN BOT ERROR</b>\n\n` +
+            `📅 <b>Вақт:</b> ${now}\n` +
+            `👤 <b>User ID:</b> <code>${userId}</code>\n` +
+            `📝 <b>Update Type:</b> ${updateType}\n` +
+            `❌ <b>Хатолик:</b>\n<pre>${errorMsg.substring(0, 500)}</pre>`;
+
+        await adminBot.api.sendMessage(ERROR_NOTIFY_ID, notification, { parse_mode: 'HTML' });
+    } catch (notifyErr) {
+        console.error('[ERROR] Failed to send error notification:', notifyErr.message);
     }
 });
 
