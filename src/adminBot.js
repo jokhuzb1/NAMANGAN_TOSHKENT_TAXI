@@ -6,6 +6,7 @@ const dynamicKeyboards = require("./utils/keyboardsDynamic");
 const config = require("./config");
 const User = require("./models/User");
 const Admin = require("./models/Admin");
+const { formatDateTime } = require("./utils/i18n");
 const mongoose = require("mongoose");
 
 if (!config.ADMIN_BOT_TOKEN) {
@@ -156,7 +157,7 @@ adminBot.hears("📋 Менинг Буюртмаларим", async (ctx) => {
     await ctx.reply(`📋 <b>Фаол Админ Буюртмалари (${requests.length} та):</b>`, { parse_mode: "HTML" });
 
     for (const req of requests) {
-        const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+        const timeCreated = formatDateTime(req.createdAt);
         const msg = `
 📍 <b>${req.from} ➡️ ${req.to}</b>
 📞 ${req.contactPhone}

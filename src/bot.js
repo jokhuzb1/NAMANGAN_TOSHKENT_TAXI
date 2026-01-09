@@ -13,7 +13,7 @@ const { quickRequestConversation } = require("./conversations/quickRequest");
 const { contactActions } = require("./utils/keyboards");
 const { contextMap } = require("./utils/contextMap");
 const { broadcastRequest } = require("./utils/broadcastUtils");
-const { t } = require("./utils/i18n");
+const { t, formatDateTime } = require("./utils/i18n");
 const dynamicKeyboards = require("./utils/keyboardsDynamic");
 
 // DB Connection moved to index.js
@@ -1439,7 +1439,7 @@ async function sendRadarPage(ctx, page) {
         const itemNum = skip + i + 1;
         const typeIcon = req.type === 'parcel' ? "📦 ПОЧТА" : "🚖 ТАКСИ";
         const details = req.type === 'parcel' ? `📦 ${req.packageType}` : `💺 ${req.seats} киши${req.seatType === 'front' ? " (⚠️ ОЛДИ ўРИНДИҚ)" : ""}`;
-        const timeCreated = new Date(req.createdAt).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+        const timeCreated = formatDateTime(req.createdAt);
 
         let msg = `КЛИЕНТ #${itemNum}\n` +
             `${typeIcon} 📍 <b>${req.from.toUpperCase()} ➡️ ${req.to.toUpperCase()}</b>\n` +

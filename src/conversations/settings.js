@@ -126,14 +126,21 @@ async function manageLanguage(conversation, ctx) {
     await response.answerCallbackQuery("✅");
     await response.deleteMessage();
 
+    // Extract only primitive values to avoid DataCloneError (Mongoose docs can't be structuredCloned)
     const userForKb = await conversation.external(async () => {
-        return await User.findOne({ telegramId: ctx.from.id });
+        const u = await User.findOne({ telegramId: ctx.from.id });
+        if (!u) return null;
+        return {
+            role: u.role,
+            isOnline: u.isOnline,
+            activeRoute: u.activeRoute
+        };
     });
 
     let kb;
-    if (userForKb.role === 'passenger') {
+    if (userForKb && userForKb.role === 'passenger') {
         kb = dynamicKeyboards.getPassengerMenu(lang);
-    } else if (userForKb.role === 'driver') {
+    } else if (userForKb && userForKb.role === 'driver') {
         kb = dynamicKeyboards.getDriverMenu(lang, userForKb.isOnline, userForKb.activeRoute !== 'none');
     } else {
         kb = dynamicKeyboards.getRoleSelection(lang);

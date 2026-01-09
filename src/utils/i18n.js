@@ -68,8 +68,47 @@ function t(key, lang) {
     return dictionary[useLang]?.[key] || dictionary['uz_cyrillic'][key] || key;
 }
 
-function formatTime(date) {
-    return new Date(date).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false });
+// Uzbek Cyrillic month names
+const monthsCyrillic = ['январ', 'феврал', 'март', 'апрел', 'май', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
+
+// Uzbek Cyrillic weekday names
+const weekdaysCyrillic = ['Якшанба', 'Душанба', 'Сешанба', 'Чоршанба', 'Пайшанба', 'Жума', 'Шанба'];
+
+/**
+ * Format date with day, month, weekday and time
+ * Example: "9 январ Душанба 14:30"
+ */
+function formatDateTime(date) {
+    const d = new Date(date);
+    // Convert to Tashkent timezone
+    const options = { timeZone: 'Asia/Tashkent' };
+    const tashkentDate = new Date(d.toLocaleString('en-US', options));
+
+    const day = tashkentDate.getDate();
+    const month = monthsCyrillic[tashkentDate.getMonth()];
+    const weekday = weekdaysCyrillic[tashkentDate.getDay()];
+    const hours = String(tashkentDate.getHours()).padStart(2, '0');
+    const minutes = String(tashkentDate.getMinutes()).padStart(2, '0');
+
+    return `${day} ${month} ${weekday} ${hours}:${minutes}`;
 }
 
-module.exports = { t, formatTime, dictionary };
+/**
+ * Format time only (HH:MM)
+ */
+function formatTimeOnly(date) {
+    return new Date(date).toLocaleTimeString('uz-UZ', {
+        timeZone: 'Asia/Tashkent',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+/**
+ * Legacy formatTime - now returns full date+time
+ */
+function formatTime(date) {
+    return formatDateTime(date);
+}
+
+module.exports = { t, formatTime, formatDateTime, formatTimeOnly, dictionary, monthsCyrillic, weekdaysCyrillic };
